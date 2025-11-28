@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --afrodex-orange: #FF8C00;
+  --afrodex-black: #0a0a0a;
+}
+
+body {
+  @apply bg-afrodex-black text-white;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-afrodex-black-light;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-afrodex-orange rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-afrodex-orange-light;
+}
+
+/* Neon glow effects */
+.neon-border {
+  border: 1px solid var(--afrodex-orange);
+  box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+}
+
+.neon-text {
+  color: var(--afrodex-orange);
+  text-shadow: 0 0 10px rgba(255, 140, 0, 0.5);
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-afrodex-orange hover:bg-afrodex-orange-light text-white font-semibold py-2 px-4 rounded transition-all;
+  box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 20px rgba(255, 140, 0, 0.5);
+}
+
+.btn-buy {
+  @apply bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition-all;
+}
+
+.btn-sell {
+  @apply bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded transition-all;
+}
+
+/* Input styles */
+input[type="text"],
+input[type="number"],
+input[type="search"] {
+  @apply bg-afrodex-black-lighter border border-gray-700 text-white rounded px-3 py-2;
+  @apply focus:outline-none focus:border-afrodex-orange focus:ring-1 focus:ring-afrodex-orange;
+}
+
+input[type="text"]::placeholder,
+input[type="number"]::placeholder,
+input[type="search"]::placeholder {
+  @apply text-gray-500;
+}
+
+/* Card styles */
+.card {
+  @apply bg-afrodex-black-light border border-gray-800 rounded-lg p-4;
+}
+
+.card-neon {
+  @apply bg-afrodex-black-light rounded-lg p-4;
+  border: 1px solid var(--afrodex-orange);
+  box-shadow: 0 0 15px rgba(255, 140, 0, 0.2);
+}
+
+/* Table styles */
+table {
+  @apply w-full text-sm;
+}
+
+table th {
+  @apply text-left text-gray-400 font-semibold pb-2 border-b border-gray-800;
+}
+
+table td {
+  @apply py-2 border-b border-gray-800;
+}
+
+/* Modal/Dialog overlay */
+.overlay {
+  @apply fixed inset-0 bg-black bg-opacity-75 z-50;
+}
+
+/* Animation utilities */
+@keyframes pulse-neon {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 140, 0, 0.6);
+  }
+}
+
+.animate-pulse-neon {
+  animation: pulse-neon 2s ease-in-out infinite;
+}
+
+/* Price change colors */
+.price-up {
+  @apply text-green-500;
+}
+
+.price-down {
+  @apply text-red-500;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  @apply inline-block w-4 h-4 border-2 border-gray-600 border-t-afrodex-orange rounded-full;
+  animation: spin 1s linear infinite;
+}

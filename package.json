@@ -1,0 +1,48 @@
+{
+  "name": "afrodex-modern",
+  "version": "2.0.0",
+  "description": "AfroDex - Africa's Biggest Decentralized Exchange (Order Book)",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.0.4",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "ethers": "6.9.0",
+    "@web3modal/wagmi": "3.5.7",
+    "@wagmi/core": "1.4.13",
+    "@wagmi/connectors": "3.1.11",
+    "wagmi": "1.4.13",
+    "viem": "1.21.4",
+    "@tanstack/react-query": "5.17.0",
+    "recharts": "2.10.3",
+    "lucide-react": "0.294.0",
+    "clsx": "2.0.0",
+    "date-fns": "3.0.0",
+    "@supabase/supabase-js": "2.39.0",
+    "zustand": "4.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "20.10.0",
+    "@types/react": "18.2.45",
+    "@types/react-dom": "18.2.18",
+    "typescript": "5.3.3",
+    "autoprefixer": "10.4.16",
+    "postcss": "8.4.32",
+    "tailwindcss": "3.3.6",
+    "eslint": "8.56.0",
+    "eslint-config-next": "14.0.4"
+  },
+  "optionalDependencies": {
+    "pino-pretty": "10.3.1"
+  },
+  "overrides": {
+    "@wagmi/core": "1.4.13",
+    "@wagmi/connectors": "3.1.11"
+  }
+}
