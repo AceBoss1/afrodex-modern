@@ -1,59 +1,78 @@
-// ABI for EtherDelta/ForkDelta-style exchange contract
+// lib/abi.ts
+// Contract ABIs for AfroDex Exchange (EtherDelta/ForkDelta-style)
+
+/**
+ * EtherDelta/ForkDelta Exchange Contract ABI
+ * Contract: 0xe8fff15bb5e14095bfdfa8bb85d83cc900c23c56
+ */
 export const EXCHANGE_ABI = [
-  // Deposit ETH
-  "function deposit() payable",
+  // State variables
+  'function admin() view returns (address)',
+  'function feeAccount() view returns (address)',
+  'function accountLevelsAddr() view returns (address)',
+  'function feeMake() view returns (uint256)',
+  'function feeTake() view returns (uint256)',
+  'function feeRebate() view returns (uint256)',
   
-  // Withdraw ETH
-  "function withdraw(uint256 amount)",
+  // Balance Functions
+  'function deposit() payable',
+  'function withdraw(uint256 amount)',
+  'function depositToken(address token, uint256 amount)',
+  'function withdrawToken(address token, uint256 amount)',
+  'function balanceOf(address token, address user) view returns (uint256)',
   
-  // Deposit Token
-  "function depositToken(address token, uint256 amount)",
+  // Trading Functions
+  'function order(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce)',
+  'function trade(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s, uint256 amount)',
+  'function cancelOrder(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, uint8 v, bytes32 r, bytes32 s)',
   
-  // Withdraw Token
-  "function withdrawToken(address token, uint256 amount)",
-  
-  // Get Balance
-  "function balanceOf(address token, address user) view returns (uint256)",
-  
-  // Trade
-  "function trade(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s, uint256 amount)",
-  
-  // Order
-  "function order(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce)",
-  
-  // Cancel Order
-  "function cancelOrder(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, uint8 v, bytes32 r, bytes32 s)",
-  
-  // Test Trade
-  "function testTrade(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s, uint256 amount, address sender) view returns (bool)",
-  
-  // Available Volume
-  "function availableVolume(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s) view returns (uint256)",
-  
-  // Amount Filled
-  "function amountFilled(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s) view returns (uint256)",
+  // View Functions
+  'function testTrade(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s, uint256 amount, address sender) view returns (bool)',
+  'function availableVolume(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s) view returns (uint256)',
+  'function amountFilled(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s) view returns (uint256)',
+  'function orders(address user, bytes32 hash) view returns (bool)',
+  'function orderFills(address user, bytes32 hash) view returns (uint256)',
   
   // Events
-  "event Order(address indexed tokenGet, uint256 amountGet, address indexed tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address indexed user)",
-  "event Cancel(address indexed tokenGet, uint256 amountGet, address indexed tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address indexed user, uint8 v, bytes32 r, bytes32 s)",
-  "event Trade(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, address indexed get, address indexed give)",
-  "event Deposit(address indexed token, address indexed user, uint256 amount, uint256 balance)",
-  "event Withdraw(address indexed token, address indexed user, uint256 amount, uint256 balance)"
+  'event Order(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user)',
+  'event Cancel(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, uint256 expires, uint256 nonce, address user, uint8 v, bytes32 r, bytes32 s)',
+  'event Trade(address tokenGet, uint256 amountGet, address tokenGive, uint256 amountGive, address get, address give)',
+  'event Deposit(address token, address user, uint256 amount, uint256 balance)',
+  'event Withdraw(address token, address user, uint256 amount, uint256 balance)',
 ] as const;
 
-// ERC20 ABI for token operations
+/**
+ * Standard ERC20 Token ABI
+ */
 export const ERC20_ABI = [
-  "function name() view returns (string)",
-  "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)",
-  "function totalSupply() view returns (uint256)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
-  "function transfer(address to, uint256 amount) returns (bool)",
-  "function transferFrom(address from, address to, uint256 amount) returns (bool)",
-  "event Transfer(address indexed from, address indexed to, uint256 value)",
-  "event Approval(address indexed owner, address indexed spender, uint256 value)"
+  // Read Functions
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function totalSupply() view returns (uint256)',
+  'function balanceOf(address owner) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  
+  // Write Functions
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function transferFrom(address from, address to, uint256 amount) returns (bool)',
+  
+  // Events
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+  'event Approval(address indexed owner, address indexed spender, uint256 value)',
 ] as const;
+
+/**
+ * Multicall3 ABI for batched calls
+ */
+export const MULTICALL_ABI = [
+  'function aggregate(tuple(address target, bytes callData)[] calls) payable returns (uint256 blockNumber, bytes[] returnData)',
+  'function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[] returnData)',
+  'function tryAggregate(bool requireSuccess, tuple(address target, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[] returnData)',
+] as const;
+
+// Contract addresses
+export const MULTICALL_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11'; // Multicall3 on mainnet
 
 export default EXCHANGE_ABI;

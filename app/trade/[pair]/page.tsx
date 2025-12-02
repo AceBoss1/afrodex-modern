@@ -1,12 +1,21 @@
 // app/trade/[pair]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { usePublicClient } from 'wagmi';
-import { useAppStore } from '@/lib/store';
-import { getToken, getTokenByAddress, SUPPORTED_TOKENS } from '@/lib/tokens';
-import { fetchOrders, fetchTrades, subscribeToTrades } from '@/lib/api';
+import { ethers } from 'ethers';
+import { useTradingStore } from '@/lib/store';
+import { 
+  getToken, 
+  getTokenByAddress, 
+  Token, 
+  SUPPORTED_TOKENS,
+  isValidAddress,
+  createCustomToken,
+} from '@/lib/tokens';
+import { getTokenInfo } from '@/lib/exchange';
+import { fetchOrders, fetchTrades, subscribeToTrades, subscribeToOrders } from '@/lib/api';
+
 import Sidebar from '@/components/Sidebar';
 import TokenInfo from '@/components/TokenInfo';
 import TradingChart from '@/components/TradingChart';
@@ -17,7 +26,6 @@ import BalancePanel from '@/components/BalancePanel';
 
 export default function TradePage() {
   const params = useParams();
-  const publicClient = usePublicClient();
   const {
     baseToken,
     quoteToken,
@@ -25,46 +33,102 @@ export default function TradePage() {
     setOrders,
     setTrades,
     addTrade,
+    addOrder,
     setLoadingOrders,
     setLoadingTrades,
-  } = useAppStore();
+  } = useTradingStore();
 
   const [initialized, setInitialized] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Initialize trading pair from URL
+  // Get provider
+  const getProvider = useCallback(() => {
+    const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+    return new ethers.JsonRpcProvider(
+      alchemyKey 
+        ? `https://eth-mainnet.g.alchemy.com/v2/${alchemyKey}`
+        : 'https://eth.llamarpc.com'
+    );
+  }, []);
+
+  // Parse trading pair from URL and set up tokens
   useEffect(() => {
-    if (!params.pair) return;
+    const initializePair = async () => {
+      if (!params.pair) return;
 
-    const pairStr = params.pair as string;
-    const [baseSymbol, quoteSymbol] = pairStr.split('-');
+      const pairStr = params.pair as string;
+      const parts = pairStr.split('-');
+      
+      if (parts.length !== 2) {
+        setError('Invalid trading pair format. Use TOKEN-ETH format.');
+        return;
+      }
 
-    const base = getToken(baseSymbol);
-    const quote = getToken(quoteSymbol) || SUPPORTED_TOKENS.ETH;
+      const [baseSymbol, quoteSymbol] = parts;
+      
+      // Get quote token (usually ETH)
+      const quote = getToken(quoteSymbol) || SUPPORTED_TOKENS.ETH;
+      
+      // Try to get base token by symbol
+      let base = getToken(baseSymbol);
+      
+      // If not found, check if it's a custom address
+      if (!base && isValidAddress(baseSymbol)) {
+        try {
+          const provider = getProvider();
+          const tokenInfo = await getTokenInfo(provider, baseSymbol);
+          base = createCustomToken(
+            baseSymbol,
+            tokenInfo.symbol,
+            tokenInfo.name,
+            tokenInfo.decimals
+          );
+        } catch (err) {
+          console.error('Error loading custom token:', err);
+          setError('Failed to load token. Please check the address.');
+          return;
+        }
+      }
+      
+      if (!base) {
+        // Try finding by address in URL
+        base = getTokenByAddress(baseSymbol);
+      }
 
-    if (base) {
+      if (!base) {
+        setError(`Token "${baseSymbol}" not found. Try adding it by contract address.`);
+        return;
+      }
+
       setTradingPair(base, quote);
       setInitialized(true);
-    }
-  }, [params.pair, setTradingPair]);
+      setError(null);
+    };
 
-  // Fetch orders and trades when pair changes
+    initializePair();
+  }, [params.pair, setTradingPair, getProvider]);
+
+  // Fetch orders and trades when pair is initialized
   useEffect(() => {
-    if (!publicClient || !baseToken || !quoteToken) return;
+    if (!initialized || !baseToken || !quoteToken) return;
+
+    const provider = getProvider();
 
     const loadData = async () => {
       setLoadingOrders(true);
       setLoadingTrades(true);
 
       try {
+        // Fetch in parallel
         const [ordersData, tradesData] = await Promise.all([
-          fetchOrders(publicClient as any, baseToken, quoteToken),
-          fetchTrades(publicClient as any, baseToken, quoteToken),
+          fetchOrders(provider, baseToken, quoteToken),
+          fetchTrades(provider, baseToken, quoteToken),
         ]);
 
         setOrders(ordersData.buyOrders, ordersData.sellOrders);
         setTrades(tradesData);
-      } catch (error) {
-        console.error('Error loading data:', error);
+      } catch (err) {
+        console.error('Error loading data:', err);
       } finally {
         setLoadingOrders(false);
         setLoadingTrades(false);
@@ -73,34 +137,74 @@ export default function TradePage() {
 
     loadData();
 
-    // Subscribe to new trades
-    const unsubscribe = subscribeToTrades(
-      publicClient as any,
+    // Set up real-time subscriptions
+    const unsubTrades = subscribeToTrades(
+      provider,
       baseToken,
       quoteToken,
-      (trade) => {
-        addTrade(trade);
-      }
+      (trade) => addTrade(trade)
     );
 
-    // Refresh orders every 30 seconds
-    const interval = setInterval(async () => {
-      const ordersData = await fetchOrders(publicClient as any, baseToken, quoteToken);
-      setOrders(ordersData.buyOrders, ordersData.sellOrders);
+    const unsubOrders = subscribeToOrders(
+      provider,
+      baseToken,
+      quoteToken,
+      (order, side) => addOrder(order, side)
+    );
+
+    // Refresh orders periodically
+    const refreshInterval = setInterval(async () => {
+      try {
+        const ordersData = await fetchOrders(provider, baseToken, quoteToken, false);
+        setOrders(ordersData.buyOrders, ordersData.sellOrders);
+      } catch (err) {
+        console.error('Error refreshing orders:', err);
+      }
     }, 30000);
 
     return () => {
-      unsubscribe();
-      clearInterval(interval);
+      unsubTrades();
+      unsubOrders();
+      clearInterval(refreshInterval);
     };
-  }, [publicClient, baseToken, quoteToken, setOrders, setTrades, addTrade, setLoadingOrders, setLoadingTrades]);
+  }, [
+    initialized,
+    baseToken,
+    quoteToken,
+    getProvider,
+    setOrders,
+    setTrades,
+    addTrade,
+    addOrder,
+    setLoadingOrders,
+    setLoadingTrades,
+  ]);
 
+  // Loading state
   if (!initialized || !baseToken || !quoteToken) {
     return (
-      <div className="flex h-screen items-center justify-center bg-afrodex-black">
-        <div className="text-center">
-          <div className="spinner mb-4"></div>
-          <p className="text-gray-400">Loading trading pair...</p>
+      <div className="flex h-screen bg-afrodex-black">
+        <Sidebar />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            {error ? (
+              <>
+                <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                  <span className="text-2xl">⚠️</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Error Loading Pair</h2>
+                <p className="text-gray-500 mb-4">{error}</p>
+                <a href="/trade/AfroX-ETH" className="btn-primary">
+                  Go to Default Pair
+                </a>
+              </>
+            ) : (
+              <>
+                <div className="spinner spinner-lg mb-4" />
+                <p className="text-gray-500">Loading trading pair...</p>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -112,40 +216,46 @@ export default function TradePage() {
       <Sidebar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Token Info */}
-        <div className="p-4 border-b border-gray-800">
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Token Info Header */}
+        <header className="p-4 border-b border-white/5 bg-afrodex-black-light/50 backdrop-blur-sm">
           <TokenInfo token={baseToken} />
-        </div>
+        </header>
 
-        {/* Trading Interface */}
-        <div className="flex-1 grid grid-cols-12 gap-4 p-4 overflow-hidden">
+        {/* Trading Interface Grid */}
+        <div className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden">
           {/* Left Column - Chart + Trade History */}
-          <div className="col-span-7 flex flex-col gap-4 overflow-hidden">
-            <div className="flex-[2] min-h-0">
+          <div className="col-span-12 lg:col-span-7 flex flex-col gap-3 min-h-0">
+            {/* Chart */}
+            <div className="flex-[2] min-h-[300px]">
               <TradingChart baseToken={baseToken} quoteToken={quoteToken} />
             </div>
-            <div className="flex-1 min-h-0">
+            
+            {/* Trade History */}
+            <div className="flex-1 min-h-[200px]">
               <TradeHistory baseToken={baseToken} quoteToken={quoteToken} />
             </div>
           </div>
 
           {/* Middle Column - Order Book */}
-          <div className="col-span-3 overflow-hidden">
+          <div className="col-span-12 md:col-span-6 lg:col-span-3 min-h-0">
             <OrderBook baseToken={baseToken} quoteToken={quoteToken} />
           </div>
 
           {/* Right Column - Trading + Balance */}
-          <div className="col-span-2 flex flex-col gap-4 overflow-hidden">
-            <div className="flex-1 min-h-0">
+          <div className="col-span-12 md:col-span-6 lg:col-span-2 flex flex-col gap-3 min-h-0">
+            {/* Trading Panel */}
+            <div className="flex-1 min-h-[300px]">
               <TradingPanel baseToken={baseToken} quoteToken={quoteToken} />
             </div>
-            <div className="flex-1 min-h-0">
+            
+            {/* Balance Panel */}
+            <div className="flex-1 min-h-[280px]">
               <BalancePanel baseToken={baseToken} quoteToken={quoteToken} />
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

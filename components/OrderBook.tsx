@@ -1,9 +1,11 @@
 // components/OrderBook.tsx
 'use client';
 
-import { useAppStore } from '@/lib/store';
+import { useMemo } from 'react';
+import { useTradingStore, useUIStore } from '@/lib/store';
 import { formatAmount } from '@/lib/exchange';
 import { Token } from '@/lib/tokens';
+import { ArrowDown, ArrowUp, BookOpen } from 'lucide-react';
 
 interface OrderBookProps {
   baseToken: Token;
@@ -11,103 +13,188 @@ interface OrderBookProps {
 }
 
 export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
-  const { buyOrders, sellOrders, isLoadingOrders } = useAppStore();
+  const { buyOrders, sellOrders, isLoadingOrders, trades } = useTradingStore();
+  const { setSelectedPrice, setOrderTab } = useUIStore();
+
+  // Process orders for display
+  const processedOrders = useMemo(() => {
+    // Calculate max total for depth visualization
+    const allTotals = [
+      ...buyOrders.map(o => parseFloat(formatAmount(o.amountGet, baseToken.decimals)) * (o.price || 0)),
+      ...sellOrders.map(o => parseFloat(formatAmount(o.amountGive, baseToken.decimals)) * (o.price || 0)),
+    ];
+    const maxTotal = Math.max(...allTotals, 0.001);
+
+    const formatOrder = (order: typeof buyOrders[0], isBuy: boolean) => {
+      const amount = parseFloat(formatAmount(
+        isBuy ? order.amountGet : order.amountGive,
+        baseToken.decimals
+      ));
+      const price = order.price || 0;
+      const total = amount * price;
+      const depth = (total / maxTotal) * 100;
+
+      return { price, amount, total, depth, order };
+    };
+
+    return {
+      buys: buyOrders.slice(0, 15).map(o => formatOrder(o, true)),
+      sells: sellOrders.slice(0, 15).map(o => formatOrder(o, false)),
+    };
+  }, [buyOrders, sellOrders, baseToken.decimals]);
+
+  // Get spread info
+  const spreadInfo = useMemo(() => {
+    if (sellOrders.length === 0 || buyOrders.length === 0) {
+      return { spread: 0, spreadPercent: 0, midPrice: 0 };
+    }
+
+    const bestAsk = sellOrders[0].price || 0;
+    const bestBid = buyOrders[0].price || 0;
+    const spread = bestAsk - bestBid;
+    const spreadPercent = bestBid > 0 ? (spread / bestBid) * 100 : 0;
+    const midPrice = (bestAsk + bestBid) / 2;
+
+    return { spread, spreadPercent, midPrice };
+  }, [sellOrders, buyOrders]);
+
+  // Get last trade for mid display
+  const lastTrade = trades.length > 0 ? trades[0] : null;
+
+  // Handle clicking on an order
+  const handleOrderClick = (price: number, isBuy: boolean) => {
+    setSelectedPrice(price.toString());
+    setOrderTab(isBuy ? 'sell' : 'buy'); // If clicking buy order, user wants to sell, and vice versa
+  };
 
   if (isLoadingOrders) {
     return (
       <div className="card h-full flex items-center justify-center">
-        <div className="spinner"></div>
+        <div className="text-center">
+          <div className="spinner spinner-lg mb-3" />
+          <p className="text-sm text-gray-500">Loading order book...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="card h-full flex flex-col">
-      <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-        <span className="neon-text">Order Book</span>
-        <span className="text-sm text-gray-400">
+    <div className="card h-full flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-afrodex-orange" />
+          Order Book
+        </h3>
+        <span className="text-xs text-gray-500">
           {baseToken.symbol}/{quoteToken.symbol}
         </span>
-      </h3>
+      </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Sell Orders (Asks) */}
-        <div className="flex-1 overflow-y-auto mb-2">
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-afrodex-black-light">
-              <tr>
-                <th className="text-left">Price ({quoteToken.symbol})</th>
-                <th className="text-right">Amount ({baseToken.symbol})</th>
-                <th className="text-right">Total ({quoteToken.symbol})</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sellOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="text-center text-gray-500 py-4">
-                    No sell orders
-                  </td>
-                </tr>
-              ) : (
-                [...sellOrders].reverse().map((order, idx) => {
-                  const amount = parseFloat(formatAmount(order.availableVolume || order.amountGet, baseToken.decimals));
-                  const price = order.price || 0;
-                  const total = amount * price;
+      {/* Column Headers */}
+      <div className="grid grid-cols-3 text-xs text-gray-500 pb-2 border-b border-white/5">
+        <span>Price ({quoteToken.symbol})</span>
+        <span className="text-right">Amount ({baseToken.symbol})</span>
+        <span className="text-right">Total</span>
+      </div>
 
-                  return (
-                    <tr key={idx} className="hover:bg-afrodex-black-lighter cursor-pointer">
-                      <td className="text-red-500">{price.toFixed(6)}</td>
-                      <td className="text-right">{amount.toFixed(4)}</td>
-                      <td className="text-right">{total.toFixed(4)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Spread */}
-        <div className="py-2 text-center border-y border-gray-800">
-          {sellOrders.length > 0 && buyOrders.length > 0 ? (
-            <div className="text-sm">
-              <span className="text-gray-400">Spread: </span>
-              <span className="text-afrodex-orange font-semibold">
-                {((sellOrders[0].price! - buyOrders[0].price!) / buyOrders[0].price! * 100).toFixed(2)}%
-              </span>
+      {/* Sell Orders (Asks) - Reversed so lowest price is at bottom */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex flex-col-reverse">
+          {processedOrders.sells.length === 0 ? (
+            <div className="py-4 text-center text-gray-600 text-xs">
+              No sell orders
             </div>
           ) : (
-            <div className="text-sm text-gray-500">No spread</div>
+            processedOrders.sells.map((order, idx) => (
+              <div
+                key={`sell-${idx}`}
+                onClick={() => handleOrderClick(order.price, false)}
+                className="orderbook-row orderbook-row-sell cursor-pointer"
+                style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
+              >
+                <span className="text-trade-sell font-mono">
+                  {order.price.toFixed(8)}
+                </span>
+                <span className="text-right font-mono text-gray-300">
+                  {order.amount.toFixed(4)}
+                </span>
+                <span className="text-right font-mono text-gray-500">
+                  {order.total.toFixed(4)}
+                </span>
+              </div>
+            ))
           )}
         </div>
+      </div>
 
-        {/* Buy Orders (Bids) */}
-        <div className="flex-1 overflow-y-auto mt-2">
-          <table className="w-full text-xs">
-            <tbody>
-              {buyOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="text-center text-gray-500 py-4">
-                    No buy orders
-                  </td>
-                </tr>
-              ) : (
-                buyOrders.map((order, idx) => {
-                  const amount = parseFloat(formatAmount(order.availableVolume || order.amountGet, baseToken.decimals));
-                  const price = order.price || 0;
-                  const total = amount * price;
+      {/* Spread / Mid Price */}
+      <div className="py-3 border-y border-white/5 bg-afrodex-black-lighter/50">
+        <div className="flex items-center justify-center gap-4">
+          {lastTrade ? (
+            <>
+              <span className={`text-lg font-bold font-mono flex items-center gap-1 ${
+                lastTrade.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
+              }`}>
+                {lastTrade.side === 'buy' ? (
+                  <ArrowUp className="w-4 h-4" />
+                ) : (
+                  <ArrowDown className="w-4 h-4" />
+                )}
+                {lastTrade.price.toFixed(8)}
+              </span>
+              <span className="text-xs text-gray-500">
+                ≈ ${(lastTrade.price * 2500).toFixed(2)} {/* Placeholder ETH price */}
+              </span>
+            </>
+          ) : (
+            <span className="text-gray-500 text-sm">No recent trades</span>
+          )}
+        </div>
+        {spreadInfo.spread > 0 && (
+          <div className="text-center text-xs text-gray-500 mt-1">
+            Spread: {spreadInfo.spreadPercent.toFixed(2)}%
+          </div>
+        )}
+      </div>
 
-                  return (
-                    <tr key={idx} className="hover:bg-afrodex-black-lighter cursor-pointer">
-                      <td className="text-green-500">{price.toFixed(6)}</td>
-                      <td className="text-right">{amount.toFixed(4)}</td>
-                      <td className="text-right">{total.toFixed(4)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      {/* Buy Orders (Bids) */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {processedOrders.buys.length === 0 ? (
+          <div className="py-4 text-center text-gray-600 text-xs">
+            No buy orders
+          </div>
+        ) : (
+          processedOrders.buys.map((order, idx) => (
+            <div
+              key={`buy-${idx}`}
+              onClick={() => handleOrderClick(order.price, true)}
+              className="orderbook-row orderbook-row-buy cursor-pointer"
+              style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
+            >
+              <span className="text-trade-buy font-mono">
+                {order.price.toFixed(8)}
+              </span>
+              <span className="text-right font-mono text-gray-300">
+                {order.amount.toFixed(4)}
+              </span>
+              <span className="text-right font-mono text-gray-500">
+                {order.total.toFixed(4)}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Footer Stats */}
+      <div className="pt-3 border-t border-white/5 grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <span className="text-gray-500">Bids: </span>
+          <span className="text-trade-buy font-medium">{buyOrders.length}</span>
+        </div>
+        <div className="text-right">
+          <span className="text-gray-500">Asks: </span>
+          <span className="text-trade-sell font-medium">{sellOrders.length}</span>
         </div>
       </div>
     </div>

@@ -1,148 +1,274 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   --afrodex-orange: #FF8C00;
+  --afrodex-orange-light: #FFA540;
+  --afrodex-orange-dark: #E67A00;
   --afrodex-black: #0a0a0a;
-}
-
-body {
-  @apply bg-afrodex-black text-white;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --afrodex-black-light: #121212;
+  --afrodex-surface: #1e1e1e;
+  --trade-buy: #00D26A;
+  --trade-sell: #FF4757;
 }
 
 * {
   box-sizing: border-box;
-  padding: 0;
   margin: 0;
+  padding: 0;
 }
 
-/* Scrollbar styling */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-afrodex-black text-white font-body antialiased;
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(255, 140, 0, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(255, 140, 0, 0.05), transparent);
+  min-height: 100vh;
+}
+
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-afrodex-black-light;
+  @apply bg-afrodex-black-light rounded-full;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-afrodex-orange rounded;
+  @apply bg-afrodex-orange/40 rounded-full transition-colors;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-afrodex-orange-light;
+  @apply bg-afrodex-orange/60;
 }
 
-/* Neon glow effects */
-.neon-border {
-  border: 1px solid var(--afrodex-orange);
-  box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+/* Selection */
+::selection {
+  @apply bg-afrodex-orange/30 text-white;
 }
 
-.neon-text {
-  color: var(--afrodex-orange);
-  text-shadow: 0 0 10px rgba(255, 140, 0, 0.5);
+/* Focus Styles */
+*:focus-visible {
+  @apply outline-none ring-2 ring-afrodex-orange/50 ring-offset-2 ring-offset-afrodex-black;
 }
 
-/* Button styles */
-.btn-primary {
-  @apply bg-afrodex-orange hover:bg-afrodex-orange-light text-white font-semibold py-2 px-4 rounded transition-all;
-  box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+/* Component Classes */
+@layer components {
+  /* Cards */
+  .card {
+    @apply bg-afrodex-black-card border border-white/5 rounded-xl p-4 shadow-card transition-all duration-300;
+  }
+
+  .card-hover {
+    @apply hover:border-afrodex-orange/20 hover:shadow-card-hover;
+  }
+
+  .card-neon {
+    @apply bg-afrodex-black-card rounded-xl p-4;
+    border: 1px solid rgba(255, 140, 0, 0.3);
+    box-shadow: 0 0 20px rgba(255, 140, 0, 0.1), inset 0 0 20px rgba(255, 140, 0, 0.02);
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-medium rounded-lg px-4 py-2.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-afrodex-orange hover:bg-afrodex-orange-light text-white shadow-neon-subtle hover:shadow-neon;
+  }
+
+  .btn-secondary {
+    @apply btn bg-white/5 hover:bg-white/10 text-white border border-white/10 hover:border-white/20;
+  }
+
+  .btn-buy {
+    @apply btn bg-trade-buy hover:bg-trade-buy-dark text-white font-semibold;
+    box-shadow: 0 0 20px rgba(0, 210, 106, 0.2);
+  }
+
+  .btn-buy:hover {
+    box-shadow: 0 0 30px rgba(0, 210, 106, 0.3);
+  }
+
+  .btn-sell {
+    @apply btn bg-trade-sell hover:bg-trade-sell-dark text-white font-semibold;
+    box-shadow: 0 0 20px rgba(255, 71, 87, 0.2);
+  }
+
+  .btn-sell:hover {
+    box-shadow: 0 0 30px rgba(255, 71, 87, 0.3);
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full bg-afrodex-black-lighter border border-white/10 rounded-lg px-4 py-3 text-white placeholder-gray-500 transition-all duration-200;
+    @apply focus:outline-none focus:border-afrodex-orange/50 focus:ring-1 focus:ring-afrodex-orange/30;
+  }
+
+  .input-group {
+    @apply relative;
+  }
+
+  .input-group .input {
+    @apply pr-16;
+  }
+
+  .input-suffix {
+    @apply absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium;
+  }
+
+  /* Text Styles */
+  .text-gradient {
+    @apply bg-gradient-to-r from-afrodex-orange to-afrodex-orange-light bg-clip-text text-transparent;
+  }
+
+  .neon-text {
+    color: var(--afrodex-orange);
+    text-shadow: 0 0 10px rgba(255, 140, 0, 0.5), 0 0 20px rgba(255, 140, 0, 0.3);
+  }
+
+  /* Price Colors */
+  .price-up {
+    @apply text-trade-buy;
+  }
+
+  .price-down {
+    @apply text-trade-sell;
+  }
+
+  /* Dividers */
+  .divider {
+    @apply h-px bg-gradient-to-r from-transparent via-white/10 to-transparent;
+  }
+
+  /* Loading */
+  .spinner {
+    @apply inline-block w-5 h-5 border-2 border-white/20 border-t-afrodex-orange rounded-full animate-spin;
+  }
+
+  .spinner-sm {
+    @apply w-4 h-4;
+  }
+
+  .spinner-lg {
+    @apply w-8 h-8 border-[3px];
+  }
+
+  /* Tabs */
+  .tabs {
+    @apply flex gap-1 p-1 bg-afrodex-black-lighter rounded-lg;
+  }
+
+  .tab {
+    @apply flex-1 py-2 px-4 rounded-md text-sm font-medium text-gray-400 transition-all duration-200;
+    @apply hover:text-white;
+  }
+
+  .tab-active {
+    @apply bg-afrodex-orange text-white;
+  }
+
+  /* Order Book Table */
+  .orderbook-row {
+    @apply grid grid-cols-3 py-1.5 px-2 text-xs font-mono cursor-pointer transition-colors duration-150;
+    @apply hover:bg-white/5;
+  }
+
+  .orderbook-row-buy {
+    background: linear-gradient(90deg, rgba(0, 210, 106, 0.1) var(--depth, 0%), transparent var(--depth, 0%));
+  }
+
+  .orderbook-row-sell {
+    background: linear-gradient(90deg, rgba(255, 71, 87, 0.1) var(--depth, 0%), transparent var(--depth, 0%));
+  }
+
+  /* Tooltip */
+  .tooltip {
+    @apply relative;
+  }
+
+  .tooltip::after {
+    content: attr(data-tooltip);
+    @apply absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs bg-afrodex-surface text-white rounded whitespace-nowrap opacity-0 pointer-events-none transition-opacity duration-200;
+  }
+
+  .tooltip:hover::after {
+    @apply opacity-100;
+  }
 }
 
-.btn-primary:hover {
-  box-shadow: 0 0 20px rgba(255, 140, 0, 0.5);
-}
-
-.btn-buy {
-  @apply bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition-all;
-}
-
-.btn-sell {
-  @apply bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded transition-all;
-}
-
-/* Input styles */
-input[type="text"],
-input[type="number"],
-input[type="search"] {
-  @apply bg-afrodex-black-lighter border border-gray-700 text-white rounded px-3 py-2;
-  @apply focus:outline-none focus:border-afrodex-orange focus:ring-1 focus:ring-afrodex-orange;
-}
-
-input[type="text"]::placeholder,
-input[type="number"]::placeholder,
-input[type="search"]::placeholder {
-  @apply text-gray-500;
-}
-
-/* Card styles */
-.card {
-  @apply bg-afrodex-black-light border border-gray-800 rounded-lg p-4;
-}
-
-.card-neon {
-  @apply bg-afrodex-black-light rounded-lg p-4;
-  border: 1px solid var(--afrodex-orange);
-  box-shadow: 0 0 15px rgba(255, 140, 0, 0.2);
-}
-
-/* Table styles */
+/* Table Styles */
 table {
   @apply w-full text-sm;
 }
 
 table th {
-  @apply text-left text-gray-400 font-semibold pb-2 border-b border-gray-800;
+  @apply text-left text-gray-400 font-medium text-xs uppercase tracking-wider py-3 px-2 border-b border-white/5;
 }
 
 table td {
-  @apply py-2 border-b border-gray-800;
+  @apply py-2.5 px-2 border-b border-white/5;
 }
 
-/* Modal/Dialog overlay */
-.overlay {
-  @apply fixed inset-0 bg-black bg-opacity-75 z-50;
+table tbody tr {
+  @apply transition-colors duration-150 hover:bg-white/5;
 }
 
-/* Animation utilities */
-@keyframes pulse-neon {
+/* Number Input - Remove Arrows */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Animations */
+@keyframes float {
   0%, 100% {
-    box-shadow: 0 0 10px rgba(255, 140, 0, 0.3);
+    transform: translateY(0);
   }
   50% {
-    box-shadow: 0 0 20px rgba(255, 140, 0, 0.6);
+    transform: translateY(-5px);
   }
 }
 
-.animate-pulse-neon {
-  animation: pulse-neon 2s ease-in-out infinite;
+.animate-float {
+  animation: float 3s ease-in-out infinite;
 }
 
-/* Price change colors */
-.price-up {
-  @apply text-green-500;
+/* Modal Overlay */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center;
+  animation: fade-in 0.2s ease-out;
 }
 
-.price-down {
-  @apply text-red-500;
+.modal-content {
+  @apply bg-afrodex-black-card border border-white/10 rounded-2xl shadow-2xl max-w-md w-full mx-4;
+  animation: slide-up 0.3s ease-out;
 }
 
-/* Loading spinner */
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Glassmorphism */
+.glass {
+  @apply bg-white/5 backdrop-blur-xl border border-white/10;
 }
 
-.spinner {
-  @apply inline-block w-4 h-4 border-2 border-gray-600 border-t-afrodex-orange rounded-full;
-  animation: spin 1s linear infinite;
+/* Gradient Border */
+.gradient-border {
+  position: relative;
+  background: linear-gradient(var(--afrodex-black), var(--afrodex-black)) padding-box,
+              linear-gradient(135deg, var(--afrodex-orange), transparent) border-box;
+  border: 1px solid transparent;
 }
