@@ -21,6 +21,7 @@ import {
   Wallet,
   ArrowDownToLine,
   ArrowUpFromLine,
+  ArrowLeftRight,
   RefreshCw,
   AlertCircle,
   Loader2,
@@ -292,29 +293,40 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         </div>
       </div>
 
-      {/* Deposit/Withdraw Tabs */}
+      {/* Deposit/Withdraw/Transfer Tabs */}
       <div className="flex gap-1 mb-4 border-b border-white/5">
         <button
           onClick={() => setBalanceTab('deposit')}
-          className={`flex-1 py-2 flex items-center justify-center gap-1.5 text-sm transition-all ${
+          className={`flex-1 py-2 flex items-center justify-center gap-1 text-xs transition-all ${
             balanceTab === 'deposit'
               ? 'border-b-2 border-afrodex-orange text-afrodex-orange'
               : 'text-gray-500 hover:text-white'
           }`}
         >
-          <ArrowDownToLine className="w-4 h-4" />
+          <ArrowDownToLine className="w-3 h-3" />
           Deposit
         </button>
         <button
           onClick={() => setBalanceTab('withdraw')}
-          className={`flex-1 py-2 flex items-center justify-center gap-1.5 text-sm transition-all ${
+          className={`flex-1 py-2 flex items-center justify-center gap-1 text-xs transition-all ${
             balanceTab === 'withdraw'
               ? 'border-b-2 border-afrodex-orange text-afrodex-orange'
               : 'text-gray-500 hover:text-white'
           }`}
         >
-          <ArrowUpFromLine className="w-4 h-4" />
+          <ArrowUpFromLine className="w-3 h-3" />
           Withdraw
+        </button>
+        <button
+          onClick={() => setBalanceTab('transfer')}
+          className={`flex-1 py-2 flex items-center justify-center gap-1 text-xs transition-all ${
+            balanceTab === 'transfer'
+              ? 'border-b-2 border-afrodex-orange text-afrodex-orange'
+              : 'text-gray-500 hover:text-white'
+          }`}
+        >
+          <ArrowLeftRight className="w-3 h-3" />
+          Transfer
         </button>
       </div>
 
@@ -358,8 +370,20 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
 
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full mt-auto" disabled>
+        <button className="btn-secondary w-full" disabled>
           Connect Wallet
+        </button>
+      ) : balanceTab === 'transfer' ? (
+        <button
+          disabled={loading || !amount || parseFloat(amount) <= 0}
+          className="btn-primary w-full"
+          onClick={() => {
+            // Transfer functionality - placeholder
+            alert('Transfer feature coming soon!');
+          }}
+        >
+          <ArrowLeftRight className="w-4 h-4" />
+          Transfer {selectedToken.symbol}
         </button>
       ) : needsApproval && balanceTab === 'deposit' ? (
         <button
@@ -402,13 +426,6 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
           )}
         </button>
       )}
-
-      {/* Help Text */}
-      <p className="mt-3 text-[10px] text-gray-600 text-center">
-        {balanceTab === 'deposit'
-          ? 'Deposit funds to trade on the exchange'
-          : 'Withdraw funds back to your wallet'}
-      </p>
     </div>
   );
 }

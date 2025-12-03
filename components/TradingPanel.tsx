@@ -249,16 +249,6 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         </div>
       </div>
 
-      {/* Order Summary */}
-      <div className="p-3 bg-afrodex-black-lighter/50 rounded-lg mb-4 text-xs text-gray-500">
-        <p className="mb-1">
-          {isBuy ? 'You will receive' : 'You will pay'}: {amount || '0'} {baseToken.symbol}
-        </p>
-        <p>
-          {isBuy ? 'You will pay' : 'You will receive'}: {total} {quoteToken.symbol}
-        </p>
-      </div>
-
       {/* Error Message */}
       {error && (
         <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg mb-4 text-xs text-red-400">
@@ -269,7 +259,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full mt-auto" disabled>
+        <button className="btn-secondary w-full" disabled>
           Connect Wallet to Trade
         </button>
       ) : (
@@ -290,11 +280,6 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           )}
         </button>
       )}
-
-      {/* Disclaimer */}
-      <p className="mt-3 text-[10px] text-gray-600 text-center">
-        Ensure you have deposited funds to the exchange before placing orders
-      </p>
     </div>
   );
 }
