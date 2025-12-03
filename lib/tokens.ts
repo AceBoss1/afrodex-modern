@@ -218,7 +218,7 @@ export function createCustomToken(
     address,
     decimals,
     logo: '/tokens/empty-token.png',
-    description: `Custom unlisted token at ${address.slice(0, 8)}...${address.slice(-6)}`,
+    description: '⚠️ Important Notice: This token is not officially listed on AfroDex. Always verify the contract address before proceeding, as lost funds due to incorrect contract interactions are irreversible.',
     isCustom: true,
     etherscan: `https://etherscan.io/token/${address}`,
   };
