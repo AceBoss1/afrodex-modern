@@ -216,28 +216,20 @@ export default function TradePage() {
       <Sidebar />
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Main Grid - Token Info + Place Order/Balance on same row */}
+      <main className="flex-1 flex overflow-hidden">
+        {/* Left Side - Token Info + Chart + Recent Trades */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Top Section: Token Info + Place Order + Balance */}
-          <div className="grid grid-cols-12 gap-3 p-3 pb-0">
-            {/* Token Info - spans most of the width */}
-            <div className="col-span-12 lg:col-span-9">
-              <TokenInfo token={baseToken} />
-            </div>
-            
-            {/* Place Order Panel - Right side, top */}
-            <div className="col-span-12 lg:col-span-3 row-span-1">
-              <TradingPanel baseToken={baseToken} quoteToken={quoteToken} />
-            </div>
+          {/* Token Info Header */}
+          <div className="p-3 pb-0">
+            <TokenInfo token={baseToken} />
           </div>
 
-          {/* Bottom Section: Chart + Trades + Order Book + Balance */}
+          {/* Chart + Recent Trades + Order Book Row */}
           <div className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden">
-            {/* Left Column - Chart + Trade History */}
-            <div className="col-span-12 lg:col-span-6 flex flex-col gap-3 min-h-0">
+            {/* Chart + Recent Trades Column */}
+            <div className="col-span-12 lg:col-span-8 flex flex-col gap-3 min-h-0">
               {/* Chart */}
-              <div className="flex-[2] min-h-[280px]">
+              <div className="flex-[2] min-h-[250px]">
                 <TradingChart baseToken={baseToken} quoteToken={quoteToken} />
               </div>
               
@@ -247,15 +239,23 @@ export default function TradePage() {
               </div>
             </div>
 
-            {/* Middle Column - Order Book */}
-            <div className="col-span-12 md:col-span-6 lg:col-span-3 min-h-0">
+            {/* Order Book Column */}
+            <div className="col-span-12 lg:col-span-4 min-h-0">
               <OrderBook baseToken={baseToken} quoteToken={quoteToken} />
             </div>
+          </div>
+        </div>
 
-            {/* Right Column - Balance Panel */}
-            <div className="col-span-12 md:col-span-6 lg:col-span-3 min-h-0">
-              <BalancePanel baseToken={baseToken} quoteToken={quoteToken} />
-            </div>
+        {/* Right Side - Place Order + Balances (Full Height Column) */}
+        <div className="w-72 flex-shrink-0 flex flex-col gap-3 p-3 border-l border-white/5 overflow-y-auto">
+          {/* Place Order */}
+          <div className="flex-shrink-0">
+            <TradingPanel baseToken={baseToken} quoteToken={quoteToken} />
+          </div>
+          
+          {/* Balances */}
+          <div className="flex-shrink-0">
+            <BalancePanel baseToken={baseToken} quoteToken={quoteToken} />
           </div>
         </div>
       </main>
