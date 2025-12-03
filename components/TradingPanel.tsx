@@ -55,22 +55,34 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const baseBalance = balances[baseToken.address.toLowerCase()];
   const quoteBalance = balances[quoteToken.address.toLowerCase()];
 
-  // Calculate total
-  const total = price && amount 
-    ? (parseFloat(price) * parseFloat(amount))
-    : 0;
+  // Calculate total with proper precision for very small numbers
+  const calculateTotal = (): string => {
+    if (!price || !amount) return '0';
+    const priceNum = parseFloat(price);
+    const amountNum = parseFloat(amount);
+    if (isNaN(priceNum) || isNaN(amountNum)) return '0';
+    
+    // Use high precision calculation
+    const result = priceNum * amountNum;
+    // Convert to string without scientific notation
+    if (result === 0) return '0';
+    if (result < 0.000000000000000001) return '0';
+    
+    // Format to 18 decimal places max (ETH precision)
+    return result.toFixed(18).replace(/\.?0+$/, '');
+  };
   
-  const totalDisplay = formatDisplayPrice(total);
+  const totalStr = calculateTotal();
+  const totalNum = parseFloat(totalStr) || 0;
+  const totalDisplay = formatDisplayPrice(totalNum);
 
   // Get available balance based on order type
   const getAvailableBalance = () => {
     if (orderTab === 'buy') {
-      // Buying base token, need quote token (ETH)
       return quoteBalance?.exchange 
         ? parseFloat(formatAmount(quoteBalance.exchange, quoteToken.decimals))
         : 0;
     } else {
-      // Selling base token, need base token
       return baseBalance?.exchange 
         ? parseFloat(formatAmount(baseBalance.exchange, baseToken.decimals))
         : 0;
@@ -112,7 +124,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
     // Check balance
     const available = getAvailableBalance();
-    const required = orderTab === 'buy' ? priceNum * amountNum : amountNum;
+    const required = orderTab === 'buy' ? totalNum : amountNum;
     
     if (required > available) {
       setError(`Insufficient ${orderTab === 'buy' ? quoteToken.symbol : baseToken.symbol} balance. You need to deposit first.`);
@@ -129,8 +141,17 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
       // Calculate amounts in wei
       const amountBase = parseAmount(amount, baseToken.decimals);
-      const totalStr = total.toString();
       const amountQuote = parseAmount(totalStr, quoteToken.decimals);
+      
+      console.log('Order details:', {
+        price,
+        amount,
+        totalStr,
+        amountBase,
+        amountQuote,
+        baseDecimals: baseToken.decimals,
+        quoteDecimals: quoteToken.decimals
+      });
 
       // Determine order parameters based on side
       // Buy order: want base token, give quote token (ETH)
