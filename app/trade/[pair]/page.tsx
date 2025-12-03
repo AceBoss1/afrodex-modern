@@ -247,7 +247,7 @@ export default function TradePage() {
         </div>
 
         {/* Right Side - Place Order + Balances (Full Height Column) */}
-        <div className="w-72 flex-shrink-0 flex flex-col gap-3 p-3 border-l border-white/5 overflow-y-auto">
+        <div className="w-72 flex-shrink-0 flex flex-col gap-3 p-3 border-l border-white/5">
           {/* Place Order */}
           <div className="flex-shrink-0">
             <TradingPanel baseToken={baseToken} quoteToken={quoteToken} />
