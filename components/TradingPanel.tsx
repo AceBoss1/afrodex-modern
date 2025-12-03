@@ -166,7 +166,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const isBuy = orderTab === 'buy';
 
   return (
-    <div className="card h-full flex flex-col overflow-hidden">
+    <div className="card flex flex-col">
       {/* Header */}
       <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
         <ArrowDownUp className="w-4 h-4 text-afrodex-orange" />

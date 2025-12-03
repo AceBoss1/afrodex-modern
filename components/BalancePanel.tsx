@@ -232,7 +232,7 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
   };
 
   return (
-    <div className="card h-full flex flex-col overflow-hidden">
+    <div className="card flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold flex items-center gap-2">
