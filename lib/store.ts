@@ -136,9 +136,9 @@ interface UIState {
   
   // Active tabs
   orderTab: 'buy' | 'sell';
-  balanceTab: 'deposit' | 'withdraw';
+  balanceTab: 'deposit' | 'withdraw' | 'transfer';
   setOrderTab: (tab: 'buy' | 'sell') => void;
-  setBalanceTab: (tab: 'deposit' | 'withdraw') => void;
+  setBalanceTab: (tab: 'deposit' | 'withdraw' | 'transfer') => void;
   
   // Selected price (when clicking order book)
   selectedPrice: string | null;
