@@ -99,7 +99,7 @@ export default function TokenInfo({ token }: TokenInfoProps) {
             <p className="text-sm text-gray-400 mb-1">{token.name}</p>
             
             {/* Description - with warning style for custom tokens */}
-            <p className={`text-xs mb-2 line-clamp-2 ${
+            <p className={`text-xs mb-2 line-clamp-3 ${
               token.isCustom ? 'text-yellow-400/80' : 'text-gray-500'
             }`}>
               {token.description}
