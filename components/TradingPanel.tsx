@@ -174,45 +174,58 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
       </h3>
 
       {/* Buy/Sell Toggle */}
-      <div className="tabs mb-4">
+      <div className="flex gap-2 mb-4">
         <button
           onClick={() => setOrderTab('buy')}
-          className={`tab ${orderTab === 'buy' ? 'tab-active !bg-trade-buy' : ''}`}
+          className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${
+            orderTab === 'buy' 
+              ? 'bg-trade-buy text-black' 
+              : 'bg-transparent text-gray-400 hover:text-white'
+          }`}
         >
           Buy
         </button>
         <button
           onClick={() => setOrderTab('sell')}
-          className={`tab ${orderTab === 'sell' ? 'tab-active !bg-trade-sell' : ''}`}
+          className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${
+            orderTab === 'sell' 
+              ? 'bg-trade-sell text-white' 
+              : 'bg-transparent text-gray-400 hover:text-white'
+          }`}
         >
           Sell
         </button>
       </div>
 
       {/* Price Input */}
-      <div className="mb-3">
-        <label className="block text-xs text-gray-500 mb-1.5">
-          Price ({quoteToken.symbol})
-        </label>
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-xs text-gray-500">
+            Price ({quoteToken.symbol})
+          </label>
+          <span className="text-xs text-gray-500">
+            Avail: {getAvailableBalance().toFixed(4)} {quoteToken.symbol}
+          </span>
+        </div>
         <input
           type="number"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           placeholder="0.00000000"
-          className="input font-mono text-sm"
+          className="input font-mono"
           step="any"
           min="0"
         />
       </div>
 
       {/* Amount Input */}
-      <div className="mb-3">
+      <div className="mb-4">
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs text-gray-500">
             Amount ({baseToken.symbol})
           </label>
           <span className="text-xs text-gray-500">
-            Avail: {getAvailableBalance().toFixed(4)} {isBuy ? quoteToken.symbol : baseToken.symbol}
+            Total in:<span className="text-afrodex-orange font-mono ml-1">{total}</span> {quoteToken.symbol}
           </span>
         </div>
         <input
@@ -220,59 +233,51 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.0000"
-          className="input font-mono text-sm"
+          className="input font-mono"
           step="any"
           min="0"
         />
-        
-        {/* Percentage Buttons */}
-        <div className="flex gap-1 mt-2">
-          {[0.25, 0.5, 0.75, 1].map((pct) => (
-            <button
-              key={pct}
-              onClick={() => setPercentage(pct)}
-              className="flex-1 py-1 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors"
-            >
-              {pct * 100}%
-            </button>
-          ))}
-        </div>
       </div>
-
-      {/* Total */}
-      <div className="p-3 bg-afrodex-black-lighter rounded-lg mb-4">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Total</span>
-          <span className="font-mono font-medium">
-            {total} {quoteToken.symbol}
-          </span>
-        </div>
+        
+      {/* Percentage Buttons */}
+      <div className="flex gap-2 mb-4">
+        {[0.25, 0.5, 0.75, 1].map((pct) => (
+          <button
+            key={pct}
+            onClick={() => setPercentage(pct)}
+            className="flex-1 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-white/10 rounded transition-colors"
+          >
+            {pct * 100}%
+          </button>
+        ))}
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg mb-4 text-xs text-red-400">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
+          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
       )}
 
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full py-2 text-sm" disabled>
+        <button className="w-full py-3 rounded-lg font-semibold text-sm bg-gray-700 text-gray-400" disabled>
           Connect Wallet
         </button>
       ) : (
         <button
           onClick={handlePlaceOrder}
           disabled={loading || !price || !amount || parseFloat(price) <= 0 || parseFloat(amount) <= 0}
-          className={`w-full py-2 text-sm rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-            isBuy ? 'btn-buy' : 'btn-sell'
+          className={`w-full py-3 rounded-lg font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+            isBuy 
+              ? 'bg-trade-buy/90 hover:bg-trade-buy text-black' 
+              : 'bg-trade-sell/90 hover:bg-trade-sell text-white'
           }`}
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-3 h-3 animate-spin" />
+              <Loader2 className="w-4 h-4 animate-spin" />
               Placing...
             </span>
           ) : (

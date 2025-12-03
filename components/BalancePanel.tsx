@@ -45,6 +45,7 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
 
   const [selectedToken, setSelectedToken] = useState<Token>(baseToken);
   const [amount, setAmount] = useState('');
+  const [transferAddress, setTransferAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [needsApproval, setNeedsApproval] = useState(false);
@@ -212,6 +213,59 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
     }
   };
 
+  // Handle transfer
+  const handleTransfer = async () => {
+    if (!walletClient || !address || !amount || !transferAddress) return;
+
+    // Validate address
+    if (!ethers.isAddress(transferAddress)) {
+      setError('Invalid recipient address');
+      return;
+    }
+
+    if (transferAddress.toLowerCase() === address.toLowerCase()) {
+      setError('Cannot transfer to yourself');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const provider = new ethers.BrowserProvider(walletClient as any);
+      const signer = await provider.getSigner();
+      const amountWei = parseAmount(amount, selectedToken.decimals);
+
+      let tx;
+      if (selectedToken.address === ZERO_ADDRESS) {
+        // Transfer ETH
+        tx = await signer.sendTransaction({
+          to: transferAddress,
+          value: amountWei,
+        });
+      } else {
+        // Transfer ERC20 token
+        const tokenContract = new ethers.Contract(
+          selectedToken.address,
+          ['function transfer(address to, uint256 amount) returns (bool)'],
+          signer
+        );
+        tx = await tokenContract.transfer(transferAddress, amountWei);
+      }
+
+      await tx.wait();
+      setAmount('');
+      setTransferAddress('');
+      fetchBalances();
+      alert('Transfer successful!');
+    } catch (err: any) {
+      console.error('Error transferring:', err);
+      setError(err.message || 'Failed to transfer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Get current balances
   const currentBalance = balances[selectedToken.address.toLowerCase()];
   const walletBalance = currentBalance 
@@ -229,8 +283,14 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         ? Math.max(0, walletBalance - 0.01)
         : walletBalance;
       setAmount(maxAmount.toString());
-    } else {
+    } else if (balanceTab === 'withdraw') {
       setAmount(exchangeBalance.toString());
+    } else {
+      // Transfer - use wallet balance
+      const maxAmount = selectedToken.address === ZERO_ADDRESS 
+        ? Math.max(0, walletBalance - 0.01)
+        : walletBalance;
+      setAmount(maxAmount.toString());
     }
   };
 
@@ -362,10 +422,27 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         </div>
       </div>
 
+      {/* Transfer Address Input - Only show for transfer tab */}
+      {balanceTab === 'transfer' && (
+        <div className="mb-4">
+          <label className="text-xs text-gray-500 mb-1.5 block">Recipient Address</label>
+          <input
+            type="text"
+            value={transferAddress}
+            onChange={(e) => {
+              setTransferAddress(e.target.value);
+              setError(null);
+            }}
+            placeholder="0x..."
+            className="input font-mono text-xs"
+          />
+        </div>
+      )}
+
       {/* Error Message */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg mb-4 text-xs text-red-400">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
+          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
       )}
@@ -377,14 +454,21 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         </button>
       ) : balanceTab === 'transfer' ? (
         <button
-          disabled={loading || !amount || parseFloat(amount) <= 0}
+          disabled={loading || !amount || parseFloat(amount) <= 0 || !transferAddress || !ethers.isAddress(transferAddress)}
           className="btn-primary w-full py-2 text-sm"
-          onClick={() => {
-            alert('Transfer feature coming soon!');
-          }}
+          onClick={handleTransfer}
         >
-          <ArrowLeftRight className="w-3 h-3" />
-          Transfer {selectedToken.symbol}
+          {loading ? (
+            <span className="flex items-center justify-center gap-2">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Transferring...
+            </span>
+          ) : (
+            <>
+              <ArrowLeftRight className="w-3 h-3" />
+              Transfer {selectedToken.symbol}
+            </>
+          )}
         </button>
       ) : needsApproval && balanceTab === 'deposit' ? (
         <button
