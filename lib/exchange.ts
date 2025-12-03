@@ -567,4 +567,189 @@ export async function getExpirationBlock(
   return (currentBlock + blocksUntilExpiry).toString();
 }
 
+// ============================================
+// Historical Event Fetching
+// ============================================
+
+/**
+ * Fetch historical Order events from the blockchain
+ */
+export async function fetchOrderEvents(
+  provider: Provider,
+  baseTokenAddress: string,
+  quoteTokenAddress: string,
+  fromBlock: number = 0,
+  toBlock: number | 'latest' = 'latest'
+): Promise<Order[]> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    // Get current block if toBlock is 'latest'
+    const currentBlock = await provider.getBlockNumber();
+    const endBlock = toBlock === 'latest' ? currentBlock : toBlock;
+    
+    // Limit range to avoid RPC timeouts (fetch last ~50000 blocks max)
+    const startBlock = Math.max(fromBlock, endBlock - 50000);
+    
+    // Fetch Order events
+    const orderFilter = contract.filters.Order();
+    const events = await contract.queryFilter(orderFilter, startBlock, endBlock);
+    
+    const orders: Order[] = [];
+    
+    for (const event of events) {
+      const args = (event as any).args;
+      if (!args) continue;
+      
+      const tokenGet = args.tokenGet?.toLowerCase();
+      const tokenGive = args.tokenGive?.toLowerCase();
+      const baseAddr = baseTokenAddress.toLowerCase();
+      const quoteAddr = quoteTokenAddress.toLowerCase();
+      
+      // Filter for our trading pair
+      const isBuyOrder = tokenGet === baseAddr && tokenGive === quoteAddr;
+      const isSellOrder = tokenGet === quoteAddr && tokenGive === baseAddr;
+      
+      if (!isBuyOrder && !isSellOrder) continue;
+      
+      const order: Order = {
+        tokenGet: args.tokenGet,
+        amountGet: args.amountGet.toString(),
+        tokenGive: args.tokenGive,
+        amountGive: args.amountGive.toString(),
+        expires: args.expires.toString(),
+        nonce: args.nonce.toString(),
+        user: args.user,
+        side: isBuyOrder ? 'buy' : 'sell',
+      };
+      
+      // Check if order is still valid (not expired, not fully filled)
+      const blockNum = await provider.getBlockNumber();
+      if (parseInt(order.expires) > blockNum) {
+        // Check available volume
+        const filled = await getAmountFilled(provider, order);
+        const amountGet = BigInt(order.amountGet);
+        const filledAmount = BigInt(filled);
+        
+        if (filledAmount < amountGet) {
+          order.amountFilled = filled;
+          order.availableVolume = (amountGet - filledAmount).toString();
+          orders.push(order);
+        }
+      }
+    }
+    
+    return orders;
+  } catch (error) {
+    console.error('Error fetching order events:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetch historical Trade events from the blockchain
+ */
+export async function fetchTradeEvents(
+  provider: Provider,
+  baseTokenAddress: string,
+  quoteTokenAddress: string,
+  baseDecimals: number,
+  quoteDecimals: number,
+  fromBlock: number = 0,
+  toBlock: number | 'latest' = 'latest'
+): Promise<Trade[]> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    const currentBlock = await provider.getBlockNumber();
+    const endBlock = toBlock === 'latest' ? currentBlock : toBlock;
+    const startBlock = Math.max(fromBlock, endBlock - 50000);
+    
+    // Fetch Trade events
+    const tradeFilter = contract.filters.Trade();
+    const events = await contract.queryFilter(tradeFilter, startBlock, endBlock);
+    
+    const trades: Trade[] = [];
+    
+    for (const event of events) {
+      const args = (event as any).args;
+      if (!args) continue;
+      
+      const tokenGet = args.tokenGet?.toLowerCase();
+      const tokenGive = args.tokenGive?.toLowerCase();
+      const baseAddr = baseTokenAddress.toLowerCase();
+      const quoteAddr = quoteTokenAddress.toLowerCase();
+      
+      // Filter for our trading pair
+      const isBuyTrade = tokenGet === baseAddr && tokenGive === quoteAddr;
+      const isSellTrade = tokenGet === quoteAddr && tokenGive === baseAddr;
+      
+      if (!isBuyTrade && !isSellTrade) continue;
+      
+      // Get block timestamp
+      const block = await provider.getBlock(event.blockNumber);
+      const timestamp = block?.timestamp || Math.floor(Date.now() / 1000);
+      
+      const amountGet = parseFloat(formatUnits(args.amountGet.toString(), isBuyTrade ? baseDecimals : quoteDecimals));
+      const amountGive = parseFloat(formatUnits(args.amountGive.toString(), isBuyTrade ? quoteDecimals : baseDecimals));
+      
+      const trade: Trade = {
+        txHash: event.transactionHash,
+        blockNumber: event.blockNumber,
+        timestamp: Number(timestamp),
+        tokenGet: args.tokenGet,
+        amountGet: args.amountGet.toString(),
+        tokenGive: args.tokenGive,
+        amountGive: args.amountGive.toString(),
+        maker: args.get || args.maker || '',
+        taker: args.give || args.taker || '',
+        side: isBuyTrade ? 'buy' : 'sell',
+        price: isBuyTrade ? amountGive / amountGet : amountGet / amountGive,
+        baseAmount: isBuyTrade ? amountGet : amountGive,
+        quoteAmount: isBuyTrade ? amountGive : amountGet,
+      };
+      
+      trades.push(trade);
+    }
+    
+    // Sort by timestamp descending (most recent first)
+    trades.sort((a, b) => b.timestamp - a.timestamp);
+    
+    return trades;
+  } catch (error) {
+    console.error('Error fetching trade events:', error);
+    return [];
+  }
+}
+
+/**
+ * Get amount already filled for an order
+ */
+async function getAmountFilled(provider: Provider, order: Order): Promise<string> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    // Calculate order hash
+    const orderHash = keccak256(
+      solidityPacked(
+        ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
+        [
+          EXCHANGE_ADDRESS,
+          order.tokenGet,
+          order.amountGet,
+          order.tokenGive,
+          order.amountGive,
+          order.expires,
+          order.nonce
+        ]
+      )
+    );
+    
+    const filled = await contract.orderFills(order.user, orderHash);
+    return filled.toString();
+  } catch {
+    return '0';
+  }
+}
+
 export { ZERO_ADDRESS };
