@@ -259,21 +259,21 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full" disabled>
-          Connect Wallet to Trade
+        <button className="btn-secondary w-full py-2 text-sm" disabled>
+          Connect Wallet
         </button>
       ) : (
         <button
           onClick={handlePlaceOrder}
           disabled={loading || !price || !amount || parseFloat(price) <= 0 || parseFloat(amount) <= 0}
-          className={`w-full py-3 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+          className={`w-full py-2 text-sm rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
             isBuy ? 'btn-buy' : 'btn-sell'
           }`}
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Placing Order...
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Placing...
             </span>
           ) : (
             `${isBuy ? 'Buy' : 'Sell'} ${baseToken.symbol}`

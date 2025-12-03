@@ -16,7 +16,7 @@ import {
   approveToken,
   checkAllowance,
 } from '@/lib/exchange';
-import { useTradingStore, useUIStore } from '@/lib/store';
+import { useTradingStore } from '@/lib/store';
 import {
   Wallet,
   ArrowDownToLine,
@@ -39,7 +39,9 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
   const { data: walletClient } = useWalletClient();
   
   const { balances, setBalance, setLoadingBalances } = useTradingStore();
-  const { balanceTab, setBalanceTab } = useUIStore();
+  
+  // Use local state for tab to avoid TypeScript issues with store
+  const [balanceTab, setBalanceTab] = useState<'deposit' | 'withdraw' | 'transfer'>('deposit');
 
   const [selectedToken, setSelectedToken] = useState<Token>(baseToken);
   const [amount, setAmount] = useState('');
@@ -370,35 +372,34 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
 
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full" disabled>
+        <button className="btn-secondary w-full py-2 text-sm" disabled>
           Connect Wallet
         </button>
       ) : balanceTab === 'transfer' ? (
         <button
           disabled={loading || !amount || parseFloat(amount) <= 0}
-          className="btn-primary w-full"
+          className="btn-primary w-full py-2 text-sm"
           onClick={() => {
-            // Transfer functionality - placeholder
             alert('Transfer feature coming soon!');
           }}
         >
-          <ArrowLeftRight className="w-4 h-4" />
+          <ArrowLeftRight className="w-3 h-3" />
           Transfer {selectedToken.symbol}
         </button>
       ) : needsApproval && balanceTab === 'deposit' ? (
         <button
           onClick={handleApprove}
           disabled={loading || !amount || parseFloat(amount) <= 0}
-          className="btn-primary w-full"
+          className="btn-primary w-full py-2 text-sm"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
               Approving...
             </span>
           ) : (
             <>
-              <Check className="w-4 h-4" />
+              <Check className="w-3 h-3" />
               Approve {selectedToken.symbol}
             </>
           )}
@@ -407,19 +408,19 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         <button
           onClick={balanceTab === 'deposit' ? handleDeposit : handleWithdraw}
           disabled={loading || !amount || parseFloat(amount) <= 0}
-          className="btn-primary w-full"
+          className="btn-primary w-full py-2 text-sm"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
               Processing...
             </span>
           ) : (
             <>
               {balanceTab === 'deposit' ? (
-                <ArrowDownToLine className="w-4 h-4" />
+                <ArrowDownToLine className="w-3 h-3" />
               ) : (
-                <ArrowUpFromLine className="w-4 h-4" />
+                <ArrowUpFromLine className="w-3 h-3" />
               )}
               {balanceTab === 'deposit' ? 'Deposit' : 'Withdraw'}
             </>
