@@ -267,12 +267,9 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         </div>
       )}
 
-      {/* Spacer */}
-      <div className="flex-1" />
-
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full" disabled>
+        <button className="btn-secondary w-full mt-auto" disabled>
           Connect Wallet to Trade
         </button>
       ) : (
