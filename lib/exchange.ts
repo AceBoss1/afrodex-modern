@@ -433,6 +433,85 @@ export function formatAmount(amount: string, decimals: number): string {
 }
 
 /**
+ * Format amount for display with proper precision
+ * Handles very large numbers (billions) and very small numbers
+ */
+export function formatDisplayAmount(amount: number | string, maxDecimals: number = 6): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  
+  if (isNaN(num) || num === 0) return '0';
+  
+  const absNum = Math.abs(num);
+  
+  // Handle very large numbers
+  if (absNum >= 1e12) {
+    return (num / 1e12).toFixed(2) + 'T';
+  }
+  if (absNum >= 1e9) {
+    return (num / 1e9).toFixed(2) + 'B';
+  }
+  if (absNum >= 1e6) {
+    return (num / 1e6).toFixed(2) + 'M';
+  }
+  if (absNum >= 1e3) {
+    return (num / 1e3).toFixed(2) + 'K';
+  }
+  
+  // Handle normal and small numbers
+  if (absNum >= 1) {
+    return num.toFixed(Math.min(maxDecimals, 4));
+  }
+  if (absNum >= 0.0001) {
+    return num.toFixed(Math.min(maxDecimals, 6));
+  }
+  
+  // For very small numbers, use full precision
+  return num.toFixed(maxDecimals);
+}
+
+/**
+ * Format price for display - handles very small prices like 0.0000000000029476
+ */
+export function formatDisplayPrice(price: number | string, minSignificantDigits: number = 4): string {
+  const num = typeof price === 'string' ? parseFloat(price) : price;
+  
+  if (isNaN(num) || num === 0) return '0';
+  
+  const absNum = Math.abs(num);
+  
+  // For prices >= 0.0001, use standard formatting
+  if (absNum >= 0.0001) {
+    return num.toFixed(8);
+  }
+  
+  // For very small prices, find the first significant digit and show minSignificantDigits after
+  const str = num.toFixed(18);
+  const match = str.match(/^0\.0*[1-9]/);
+  if (match) {
+    const leadingZeros = match[0].length - 2; // -2 for "0."
+    const decimalsNeeded = leadingZeros + minSignificantDigits;
+    return num.toFixed(Math.min(decimalsNeeded, 18));
+  }
+  
+  return num.toFixed(18);
+}
+
+/**
+ * Format full balance without abbreviation (for inputs/exact values)
+ */
+export function formatFullBalance(amount: string, decimals: number): string {
+  try {
+    const formatted = formatUnits(amount, decimals);
+    const num = parseFloat(formatted);
+    if (num === 0) return '0';
+    // Remove trailing zeros but keep significant precision
+    return parseFloat(num.toPrecision(15)).toString();
+  } catch {
+    return '0';
+  }
+}
+
+/**
  * Parse amount to wei with specified decimals
  */
 export function parseAmount(amount: string, decimals: number): string {
