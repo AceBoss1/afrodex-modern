@@ -224,8 +224,8 @@ export default function TradePage() {
 
         {/* Trading Interface Grid */}
         <div className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden">
-          {/* Left Column - Chart + Trade History */}
-          <div className="col-span-12 lg:col-span-7 flex flex-col gap-3 min-h-0">
+          {/* Left Column - Chart + Trade History (reduced width) */}
+          <div className="col-span-12 lg:col-span-6 flex flex-col gap-3 min-h-0">
             {/* Chart */}
             <div className="flex-[2] min-h-[300px]">
               <TradingChart baseToken={baseToken} quoteToken={quoteToken} />
@@ -237,13 +237,8 @@ export default function TradePage() {
             </div>
           </div>
 
-          {/* Middle Column - Order Book */}
-          <div className="col-span-12 md:col-span-6 lg:col-span-3 min-h-0">
-            <OrderBook baseToken={baseToken} quoteToken={quoteToken} />
-          </div>
-
-          {/* Right Column - Trading + Balance */}
-          <div className="col-span-12 md:col-span-6 lg:col-span-2 flex flex-col gap-3 min-h-0">
+          {/* Middle Column - Trading + Balance (wider) */}
+          <div className="col-span-12 md:col-span-6 lg:col-span-3 flex flex-col gap-3 min-h-0">
             {/* Trading Panel */}
             <div className="flex-1 min-h-[300px]">
               <TradingPanel baseToken={baseToken} quoteToken={quoteToken} />
@@ -253,6 +248,11 @@ export default function TradePage() {
             <div className="flex-1 min-h-[280px]">
               <BalancePanel baseToken={baseToken} quoteToken={quoteToken} />
             </div>
+          </div>
+
+          {/* Right Column - Order Book */}
+          <div className="col-span-12 md:col-span-6 lg:col-span-3 min-h-0">
+            <OrderBook baseToken={baseToken} quoteToken={quoteToken} />
           </div>
         </div>
       </main>
