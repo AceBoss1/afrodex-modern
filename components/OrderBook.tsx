@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { formatAmount } from '@/lib/exchange';
+import { formatAmount, formatDisplayPrice, formatDisplayAmount } from '@/lib/exchange';
 import { Token } from '@/lib/tokens';
 import { ArrowDown, ArrowUp, BookOpen } from 'lucide-react';
 
@@ -113,14 +113,14 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
                 className="orderbook-row orderbook-row-sell cursor-pointer"
                 style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
               >
-                <span className="text-trade-sell font-mono">
-                  {order.price.toFixed(8)}
+                <span className="text-trade-sell font-mono" title={order.price.toString()}>
+                  {formatDisplayPrice(order.price)}
                 </span>
-                <span className="text-right font-mono text-gray-300">
-                  {order.amount.toFixed(4)}
+                <span className="text-right font-mono text-gray-300" title={order.amount.toString()}>
+                  {formatDisplayAmount(order.amount)}
                 </span>
-                <span className="text-right font-mono text-gray-500">
-                  {order.total.toFixed(4)}
+                <span className="text-right font-mono text-gray-500" title={order.total.toString()}>
+                  {formatDisplayAmount(order.total)}
                 </span>
               </div>
             ))
@@ -141,10 +141,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
                 ) : (
                   <ArrowDown className="w-4 h-4" />
                 )}
-                {lastTrade.price.toFixed(8)}
-              </span>
-              <span className="text-xs text-gray-500">
-                ≈ ${(lastTrade.price * 2500).toFixed(2)} {/* Placeholder ETH price */}
+                {formatDisplayPrice(lastTrade.price)}
               </span>
             </>
           ) : (
@@ -172,14 +169,14 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
               className="orderbook-row orderbook-row-buy cursor-pointer"
               style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
             >
-              <span className="text-trade-buy font-mono">
-                {order.price.toFixed(8)}
+              <span className="text-trade-buy font-mono" title={order.price.toString()}>
+                {formatDisplayPrice(order.price)}
               </span>
-              <span className="text-right font-mono text-gray-300">
-                {order.amount.toFixed(4)}
+              <span className="text-right font-mono text-gray-300" title={order.amount.toString()}>
+                {formatDisplayAmount(order.amount)}
               </span>
-              <span className="text-right font-mono text-gray-500">
-                {order.total.toFixed(4)}
+              <span className="text-right font-mono text-gray-500" title={order.total.toString()}>
+                {formatDisplayAmount(order.total)}
               </span>
             </div>
           ))

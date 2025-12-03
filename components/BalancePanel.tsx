@@ -8,6 +8,8 @@ import { Token, ZERO_ADDRESS } from '@/lib/tokens';
 import {
   getBalances,
   formatAmount,
+  formatDisplayAmount,
+  formatFullBalance,
   parseAmount,
   depositEth,
   withdrawEth,
@@ -268,28 +270,32 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
 
   // Get current balances
   const currentBalance = balances[selectedToken.address.toLowerCase()];
-  const walletBalance = currentBalance 
+  const walletBalanceRaw = currentBalance 
     ? parseFloat(formatAmount(currentBalance.wallet, selectedToken.decimals))
     : 0;
-  const exchangeBalance = currentBalance 
+  const exchangeBalanceRaw = currentBalance 
     ? parseFloat(formatAmount(currentBalance.exchange, selectedToken.decimals))
     : 0;
+  
+  // Formatted for display
+  const walletBalanceDisplay = formatDisplayAmount(walletBalanceRaw);
+  const exchangeBalanceDisplay = formatDisplayAmount(exchangeBalanceRaw);
 
   // Set max amount
   const setMaxAmount = () => {
     if (balanceTab === 'deposit') {
       // Leave some ETH for gas if depositing ETH
       const maxAmount = selectedToken.address === ZERO_ADDRESS 
-        ? Math.max(0, walletBalance - 0.01)
-        : walletBalance;
+        ? Math.max(0, walletBalanceRaw - 0.01)
+        : walletBalanceRaw;
       setAmount(maxAmount.toString());
     } else if (balanceTab === 'withdraw') {
-      setAmount(exchangeBalance.toString());
+      setAmount(exchangeBalanceRaw.toString());
     } else {
       // Transfer - use wallet balance
       const maxAmount = selectedToken.address === ZERO_ADDRESS 
-        ? Math.max(0, walletBalance - 0.01)
-        : walletBalance;
+        ? Math.max(0, walletBalanceRaw - 0.01)
+        : walletBalanceRaw;
       setAmount(maxAmount.toString());
     }
   };
@@ -343,14 +349,14 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
             <Wallet className="w-3 h-3" />
             Wallet
           </span>
-          <span className="text-sm font-mono">
-            {walletBalance.toFixed(6)}
+          <span className="text-sm font-mono" title={walletBalanceRaw.toString()}>
+            {walletBalanceDisplay}
           </span>
         </div>
         <div className="flex justify-between items-center">
           <span className="text-xs text-gray-500">Exchange</span>
-          <span className="text-sm font-mono font-semibold text-afrodex-orange">
-            {exchangeBalance.toFixed(6)}
+          <span className="text-sm font-mono font-semibold text-afrodex-orange" title={exchangeBalanceRaw.toString()}>
+            {exchangeBalanceDisplay}
           </span>
         </div>
       </div>

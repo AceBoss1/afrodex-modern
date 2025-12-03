@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Token } from '@/lib/tokens';
 import { useTradingStore } from '@/lib/store';
+import { formatDisplayPrice, formatDisplayAmount } from '@/lib/exchange';
 
 interface TokenInfoProps {
   token: Token;
@@ -167,15 +168,15 @@ export default function TokenInfo({ token }: TokenInfoProps) {
           <div className="grid grid-cols-2 gap-x-8 gap-y-3 mb-3">
             <div>
               <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Price</p>
-              <p className="text-lg font-bold font-mono">
-                {priceStats.currentPrice > 0 ? priceStats.currentPrice.toFixed(8) : '—'}
+              <p className="text-lg font-bold font-mono" title={priceStats.currentPrice.toString()}>
+                {priceStats.currentPrice > 0 ? formatDisplayPrice(priceStats.currentPrice) : '—'}
                 <span className="text-sm text-gray-500 ml-1">ETH</span>
               </p>
             </div>
             <div>
               <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">24h Volume</p>
-              <p className="text-lg font-bold font-mono">
-                {priceStats.volume24h > 0 ? priceStats.volume24h.toFixed(4) : '—'}
+              <p className="text-lg font-bold font-mono" title={priceStats.volume24h.toString()}>
+                {priceStats.volume24h > 0 ? formatDisplayAmount(priceStats.volume24h) : '—'}
                 <span className="text-sm text-gray-500 ml-1">ETH</span>
               </p>
             </div>
@@ -199,14 +200,14 @@ export default function TokenInfo({ token }: TokenInfoProps) {
             </div>
             <div>
               <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">24h High</p>
-              <p className="text-sm font-mono">
-                {priceStats.high24h > 0 ? priceStats.high24h.toFixed(8) : '—'}
+              <p className="text-sm font-mono" title={priceStats.high24h.toString()}>
+                {priceStats.high24h > 0 ? formatDisplayPrice(priceStats.high24h) : '—'}
               </p>
             </div>
             <div>
               <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">24h Low</p>
-              <p className="text-sm font-mono">
-                {priceStats.low24h > 0 ? priceStats.low24h.toFixed(8) : '—'}
+              <p className="text-sm font-mono" title={priceStats.low24h.toString()}>
+                {priceStats.low24h > 0 ? formatDisplayPrice(priceStats.low24h) : '—'}
               </p>
             </div>
             <div>

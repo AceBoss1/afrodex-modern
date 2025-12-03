@@ -9,6 +9,9 @@ import {
   placeOrder, 
   parseAmount, 
   formatAmount,
+  formatDisplayAmount,
+  formatDisplayPrice,
+  formatFullBalance,
   generateNonce,
   getExpirationBlock,
   ZERO_ADDRESS,
@@ -54,8 +57,10 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
   // Calculate total
   const total = price && amount 
-    ? (parseFloat(price) * parseFloat(amount)).toFixed(8)
-    : '0.00000000';
+    ? (parseFloat(price) * parseFloat(amount))
+    : 0;
+  
+  const totalDisplay = formatDisplayPrice(total);
 
   // Get available balance based on order type
   const getAvailableBalance = () => {
@@ -71,6 +76,9 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         : 0;
     }
   };
+
+  // Format available balance for display
+  const availableDisplay = formatDisplayAmount(getAvailableBalance());
 
   // Set percentage of available balance
   const setPercentage = (percent: number) => {
@@ -121,7 +129,8 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
       // Calculate amounts in wei
       const amountBase = parseAmount(amount, baseToken.decimals);
-      const amountQuote = parseAmount(total, quoteToken.decimals);
+      const totalStr = total.toString();
+      const amountQuote = parseAmount(totalStr, quoteToken.decimals);
 
       // Determine order parameters based on side
       // Buy order: want base token, give quote token (ETH)
@@ -204,7 +213,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
             Price ({quoteToken.symbol})
           </label>
           <span className="text-xs text-gray-500">
-            Avail: {getAvailableBalance().toFixed(4)} {quoteToken.symbol}
+            Avail: <span className="text-white">{availableDisplay}</span> {orderTab === 'buy' ? quoteToken.symbol : baseToken.symbol}
           </span>
         </div>
         <input
@@ -225,7 +234,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
             Amount ({baseToken.symbol})
           </label>
           <span className="text-xs text-gray-500">
-            Total in:<span className="text-afrodex-orange font-mono ml-1">{total}</span> {quoteToken.symbol}
+            Total in:<span className="text-afrodex-orange font-mono ml-1">{totalDisplay}</span> {quoteToken.symbol}
           </span>
         </div>
         <input
