@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { formatAmount } from '@/lib/exchange';
+import { formatAmount, formatOrderBookPrice, formatOrderBookAmount } from '@/lib/exchange';
 import { Token } from '@/lib/tokens';
 import { ArrowDown, ArrowUp, BookOpen } from 'lucide-react';
 
@@ -113,14 +113,14 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
                 className="orderbook-row orderbook-row-sell cursor-pointer"
                 style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
               >
-                <span className="text-trade-sell font-mono">
-                  {order.price.toFixed(8)}
+                <span className="text-trade-sell font-mono text-[11px]" title={order.price.toString()}>
+                  {formatOrderBookPrice(order.price)}
                 </span>
-                <span className="text-right font-mono text-gray-300">
-                  {order.amount.toFixed(4)}
+                <span className="text-right font-mono text-gray-300 text-[11px]" title={order.amount.toString()}>
+                  {formatOrderBookAmount(order.amount)}
                 </span>
-                <span className="text-right font-mono text-gray-500">
-                  {order.total.toFixed(4)}
+                <span className="text-right font-mono text-gray-500 text-[11px]" title={order.total.toString()}>
+                  {formatOrderBookAmount(order.total)}
                 </span>
               </div>
             ))
@@ -129,30 +129,25 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       </div>
 
       {/* Spread / Mid Price */}
-      <div className="py-3 border-y border-white/5 bg-afrodex-black-lighter/50">
-        <div className="flex items-center justify-center gap-4">
+      <div className="py-2 border-y border-white/5 bg-afrodex-black-lighter/50">
+        <div className="flex items-center justify-center">
           {lastTrade ? (
-            <>
-              <span className={`text-lg font-bold font-mono flex items-center gap-1 ${
-                lastTrade.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
-              }`}>
-                {lastTrade.side === 'buy' ? (
-                  <ArrowUp className="w-4 h-4" />
-                ) : (
-                  <ArrowDown className="w-4 h-4" />
-                )}
-                {lastTrade.price.toFixed(8)}
-              </span>
-              <span className="text-xs text-gray-500">
-                ≈ ${(lastTrade.price * 2500).toFixed(2)} {/* Placeholder ETH price */}
-              </span>
-            </>
+            <span className={`text-base font-bold font-mono flex items-center gap-1 ${
+              lastTrade.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
+            }`}>
+              {lastTrade.side === 'buy' ? (
+                <ArrowUp className="w-3 h-3" />
+              ) : (
+                <ArrowDown className="w-3 h-3" />
+              )}
+              {formatOrderBookPrice(lastTrade.price)}
+            </span>
           ) : (
             <span className="text-gray-500 text-sm">No recent trades</span>
           )}
         </div>
         {spreadInfo.spread > 0 && (
-          <div className="text-center text-xs text-gray-500 mt-1">
+          <div className="text-center text-[10px] text-gray-500 mt-1">
             Spread: {spreadInfo.spreadPercent.toFixed(2)}%
           </div>
         )}
@@ -172,14 +167,14 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
               className="orderbook-row orderbook-row-buy cursor-pointer"
               style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
             >
-              <span className="text-trade-buy font-mono">
-                {order.price.toFixed(8)}
+              <span className="text-trade-buy font-mono text-[11px]" title={order.price.toString()}>
+                {formatOrderBookPrice(order.price)}
               </span>
-              <span className="text-right font-mono text-gray-300">
-                {order.amount.toFixed(4)}
+              <span className="text-right font-mono text-gray-300 text-[11px]" title={order.amount.toString()}>
+                {formatOrderBookAmount(order.amount)}
               </span>
-              <span className="text-right font-mono text-gray-500">
-                {order.total.toFixed(4)}
+              <span className="text-right font-mono text-gray-500 text-[11px]" title={order.total.toString()}>
+                {formatOrderBookAmount(order.total)}
               </span>
             </div>
           ))

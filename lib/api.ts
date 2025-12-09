@@ -9,6 +9,10 @@ const orderCache = new Map<string, { orders: { buyOrders: Order[]; sellOrders: O
 const tradeCache = new Map<string, { trades: Trade[]; timestamp: number }>();
 const CACHE_DURATION = 30000; // 30 seconds
 
+// Block range to scan (increase for more history)
+const ORDER_BLOCK_RANGE = 50000; // ~1 week of blocks
+const TRADE_BLOCK_RANGE = 100000; // ~2 weeks of blocks
+
 /**
  * Get cache key for a trading pair
  */
@@ -41,11 +45,15 @@ export async function fetchOrders(
     const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
     const currentBlock = await provider.getBlockNumber();
     
-    // Fetch Order events (last 5000 blocks for performance)
-    const fromBlock = Math.max(0, currentBlock - 5000);
+    // Fetch Order events (increased range for more history)
+    const fromBlock = Math.max(0, currentBlock - ORDER_BLOCK_RANGE);
+    
+    console.log(`Fetching orders from block ${fromBlock} to ${currentBlock}`);
     
     const orderFilter = contract.filters.Order();
     const orderEvents = await contract.queryFilter(orderFilter, fromBlock, 'latest');
+    
+    console.log(`Found ${orderEvents.length} order events`);
     
     const buyOrders: Order[] = [];
     const sellOrders: Order[] = [];
@@ -75,6 +83,9 @@ export async function fetchOrders(
       
       // Check if order has expired (using block number)
       if (parseInt(expires) <= currentBlock) continue;
+      
+      // Skip orders with zero amounts (invalid)
+      if (amountGet === '0' || amountGive === '0') continue;
       
       const order: Order = {
         tokenGet,
@@ -107,6 +118,8 @@ export async function fetchOrders(
     const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
     const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
     
+    console.log(`Processed ${sortedBuyOrders.length} buy orders, ${sortedSellOrders.length} sell orders`);
+    
     const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
     
     // Update cache
@@ -126,7 +139,7 @@ export async function fetchTrades(
   provider: Provider,
   baseToken: Token,
   quoteToken: Token,
-  limit: number = 50,
+  limit: number = 100,
   useCache: boolean = true
 ): Promise<Trade[]> {
   const cacheKey = getCacheKey(baseToken, quoteToken);
@@ -143,11 +156,15 @@ export async function fetchTrades(
     const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
     const currentBlock = await provider.getBlockNumber();
     
-    // Fetch Trade events (last 10000 blocks)
-    const fromBlock = Math.max(0, currentBlock - 10000);
+    // Fetch Trade events (increased range for more history)
+    const fromBlock = Math.max(0, currentBlock - TRADE_BLOCK_RANGE);
+    
+    console.log(`Fetching trades from block ${fromBlock} to ${currentBlock}`);
     
     const tradeFilter = contract.filters.Trade();
     const tradeEvents = await contract.queryFilter(tradeFilter, fromBlock, 'latest');
+    
+    console.log(`Found ${tradeEvents.length} trade events`);
     
     const trades: Trade[] = [];
     
@@ -209,6 +226,8 @@ export async function fetchTrades(
         console.warn('Error fetching block:', blockError);
       }
     }
+    
+    console.log(`Processed ${trades.length} trades for this pair`);
     
     // Update cache
     tradeCache.set(cacheKey, { trades, timestamp: Date.now() });

@@ -8,6 +8,8 @@ import { Token, ZERO_ADDRESS } from '@/lib/tokens';
 import {
   getBalances,
   formatAmount,
+  formatDisplayAmount,
+  formatFullBalance,
   parseAmount,
   depositEth,
   withdrawEth,
@@ -16,11 +18,12 @@ import {
   approveToken,
   checkAllowance,
 } from '@/lib/exchange';
-import { useTradingStore, useUIStore } from '@/lib/store';
+import { useTradingStore } from '@/lib/store';
 import {
   Wallet,
   ArrowDownToLine,
   ArrowUpFromLine,
+  ArrowLeftRight,
   RefreshCw,
   AlertCircle,
   Loader2,
@@ -38,10 +41,13 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
   const { data: walletClient } = useWalletClient();
   
   const { balances, setBalance, setLoadingBalances } = useTradingStore();
-  const { balanceTab, setBalanceTab } = useUIStore();
+  
+  // Use local state for tab to avoid TypeScript issues with store
+  const [balanceTab, setBalanceTab] = useState<'deposit' | 'withdraw' | 'transfer'>('deposit');
 
   const [selectedToken, setSelectedToken] = useState<Token>(baseToken);
   const [amount, setAmount] = useState('');
+  const [transferAddress, setTransferAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [needsApproval, setNeedsApproval] = useState(false);
@@ -209,30 +215,93 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
     }
   };
 
+  // Handle transfer
+  const handleTransfer = async () => {
+    if (!walletClient || !address || !amount || !transferAddress) return;
+
+    // Validate address
+    if (!ethers.isAddress(transferAddress)) {
+      setError('Invalid recipient address');
+      return;
+    }
+
+    if (transferAddress.toLowerCase() === address.toLowerCase()) {
+      setError('Cannot transfer to yourself');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const provider = new ethers.BrowserProvider(walletClient as any);
+      const signer = await provider.getSigner();
+      const amountWei = parseAmount(amount, selectedToken.decimals);
+
+      let tx;
+      if (selectedToken.address === ZERO_ADDRESS) {
+        // Transfer ETH
+        tx = await signer.sendTransaction({
+          to: transferAddress,
+          value: amountWei,
+        });
+      } else {
+        // Transfer ERC20 token
+        const tokenContract = new ethers.Contract(
+          selectedToken.address,
+          ['function transfer(address to, uint256 amount) returns (bool)'],
+          signer
+        );
+        tx = await tokenContract.transfer(transferAddress, amountWei);
+      }
+
+      await tx.wait();
+      setAmount('');
+      setTransferAddress('');
+      fetchBalances();
+      alert('Transfer successful!');
+    } catch (err: any) {
+      console.error('Error transferring:', err);
+      setError(err.message || 'Failed to transfer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Get current balances
   const currentBalance = balances[selectedToken.address.toLowerCase()];
-  const walletBalance = currentBalance 
+  const walletBalanceRaw = currentBalance 
     ? parseFloat(formatAmount(currentBalance.wallet, selectedToken.decimals))
     : 0;
-  const exchangeBalance = currentBalance 
+  const exchangeBalanceRaw = currentBalance 
     ? parseFloat(formatAmount(currentBalance.exchange, selectedToken.decimals))
     : 0;
+  
+  // Formatted for display
+  const walletBalanceDisplay = formatDisplayAmount(walletBalanceRaw);
+  const exchangeBalanceDisplay = formatDisplayAmount(exchangeBalanceRaw);
 
   // Set max amount
   const setMaxAmount = () => {
     if (balanceTab === 'deposit') {
       // Leave some ETH for gas if depositing ETH
       const maxAmount = selectedToken.address === ZERO_ADDRESS 
-        ? Math.max(0, walletBalance - 0.01)
-        : walletBalance;
+        ? Math.max(0, walletBalanceRaw - 0.01)
+        : walletBalanceRaw;
       setAmount(maxAmount.toString());
+    } else if (balanceTab === 'withdraw') {
+      setAmount(exchangeBalanceRaw.toString());
     } else {
-      setAmount(exchangeBalance.toString());
+      // Transfer - use wallet balance
+      const maxAmount = selectedToken.address === ZERO_ADDRESS 
+        ? Math.max(0, walletBalanceRaw - 0.01)
+        : walletBalanceRaw;
+      setAmount(maxAmount.toString());
     }
   };
 
   return (
-    <div className="card h-full flex flex-col">
+    <div className="card flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -280,41 +349,52 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
             <Wallet className="w-3 h-3" />
             Wallet
           </span>
-          <span className="text-sm font-mono">
-            {walletBalance.toFixed(6)}
+          <span className="text-sm font-mono" title={walletBalanceRaw.toString()}>
+            {walletBalanceDisplay}
           </span>
         </div>
         <div className="flex justify-between items-center">
           <span className="text-xs text-gray-500">Exchange</span>
-          <span className="text-sm font-mono font-semibold text-afrodex-orange">
-            {exchangeBalance.toFixed(6)}
+          <span className="text-sm font-mono font-semibold text-afrodex-orange" title={exchangeBalanceRaw.toString()}>
+            {exchangeBalanceDisplay}
           </span>
         </div>
       </div>
 
-      {/* Deposit/Withdraw Tabs */}
+      {/* Deposit/Withdraw/Transfer Tabs */}
       <div className="flex gap-1 mb-4 border-b border-white/5">
         <button
           onClick={() => setBalanceTab('deposit')}
-          className={`flex-1 py-2 flex items-center justify-center gap-1.5 text-sm transition-all ${
+          className={`flex-1 py-2 flex items-center justify-center gap-1 text-xs transition-all ${
             balanceTab === 'deposit'
               ? 'border-b-2 border-afrodex-orange text-afrodex-orange'
               : 'text-gray-500 hover:text-white'
           }`}
         >
-          <ArrowDownToLine className="w-4 h-4" />
+          <ArrowDownToLine className="w-3 h-3" />
           Deposit
         </button>
         <button
           onClick={() => setBalanceTab('withdraw')}
-          className={`flex-1 py-2 flex items-center justify-center gap-1.5 text-sm transition-all ${
+          className={`flex-1 py-2 flex items-center justify-center gap-1 text-xs transition-all ${
             balanceTab === 'withdraw'
               ? 'border-b-2 border-afrodex-orange text-afrodex-orange'
               : 'text-gray-500 hover:text-white'
           }`}
         >
-          <ArrowUpFromLine className="w-4 h-4" />
+          <ArrowUpFromLine className="w-3 h-3" />
           Withdraw
+        </button>
+        <button
+          onClick={() => setBalanceTab('transfer')}
+          className={`flex-1 py-2 flex items-center justify-center gap-1 text-xs transition-all ${
+            balanceTab === 'transfer'
+              ? 'border-b-2 border-afrodex-orange text-afrodex-orange'
+              : 'text-gray-500 hover:text-white'
+          }`}
+        >
+          <ArrowLeftRight className="w-3 h-3" />
+          Transfer
         </button>
       </div>
 
@@ -348,36 +428,68 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         </div>
       </div>
 
+      {/* Transfer Address Input - Only show for transfer tab */}
+      {balanceTab === 'transfer' && (
+        <div className="mb-4">
+          <label className="text-xs text-gray-500 mb-1.5 block">Recipient Address</label>
+          <input
+            type="text"
+            value={transferAddress}
+            onChange={(e) => {
+              setTransferAddress(e.target.value);
+              setError(null);
+            }}
+            placeholder="0x..."
+            className="input font-mono text-xs"
+          />
+        </div>
+      )}
+
       {/* Error Message */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg mb-4 text-xs text-red-400">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
+          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Spacer */}
-      <div className="flex-1" />
-
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full" disabled>
+        <button className="btn-secondary w-full py-2 text-sm" disabled>
           Connect Wallet
+        </button>
+      ) : balanceTab === 'transfer' ? (
+        <button
+          disabled={loading || !amount || parseFloat(amount) <= 0 || !transferAddress || !ethers.isAddress(transferAddress)}
+          className="btn-primary w-full py-2 text-sm"
+          onClick={handleTransfer}
+        >
+          {loading ? (
+            <span className="flex items-center justify-center gap-2">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Transferring...
+            </span>
+          ) : (
+            <>
+              <ArrowLeftRight className="w-3 h-3" />
+              Transfer {selectedToken.symbol}
+            </>
+          )}
         </button>
       ) : needsApproval && balanceTab === 'deposit' ? (
         <button
           onClick={handleApprove}
           disabled={loading || !amount || parseFloat(amount) <= 0}
-          className="btn-primary w-full"
+          className="btn-primary w-full py-2 text-sm"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
               Approving...
             </span>
           ) : (
             <>
-              <Check className="w-4 h-4" />
+              <Check className="w-3 h-3" />
               Approve {selectedToken.symbol}
             </>
           )}
@@ -386,32 +498,25 @@ export default function BalancePanel({ baseToken, quoteToken }: BalancePanelProp
         <button
           onClick={balanceTab === 'deposit' ? handleDeposit : handleWithdraw}
           disabled={loading || !amount || parseFloat(amount) <= 0}
-          className="btn-primary w-full"
+          className="btn-primary w-full py-2 text-sm"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
               Processing...
             </span>
           ) : (
             <>
               {balanceTab === 'deposit' ? (
-                <ArrowDownToLine className="w-4 h-4" />
+                <ArrowDownToLine className="w-3 h-3" />
               ) : (
-                <ArrowUpFromLine className="w-4 h-4" />
+                <ArrowUpFromLine className="w-3 h-3" />
               )}
               {balanceTab === 'deposit' ? 'Deposit' : 'Withdraw'}
             </>
           )}
         </button>
       )}
-
-      {/* Help Text */}
-      <p className="mt-3 text-[10px] text-gray-600 text-center">
-        {balanceTab === 'deposit'
-          ? 'Deposit funds to trade on the exchange'
-          : 'Withdraw funds back to your wallet'}
-      </p>
     </div>
   );
 }

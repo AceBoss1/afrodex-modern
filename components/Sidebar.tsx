@@ -95,7 +95,9 @@ export default function Sidebar() {
   // Handle selecting a trading pair
   const handleSelectPair = useCallback((token: Token) => {
     setTradingPair(token, SUPPORTED_TOKENS.ETH);
-    router.push(`/trade/${token.symbol}-ETH`);
+    // Use address for custom/unlisted tokens, symbol for official tokens
+    const pairIdentifier = token.isCustom ? token.address : token.symbol;
+    router.push(`/trade/${pairIdentifier}-ETH`);
     setSearchQuery('');
   }, [setTradingPair, router]);
 
@@ -178,7 +180,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-80 bg-afrodex-black-light border-r border-white/5 h-screen flex flex-col relative z-40">
+    <aside className="w-72 bg-afrodex-black-light border-r border-white/5 h-screen flex flex-col relative z-40">
       {/* Header */}
       <div className="p-4 border-b border-white/5">
         <div className="flex items-center justify-between">
@@ -194,7 +196,7 @@ export default function Sidebar() {
             </div>
             <div>
               <h1 className="text-lg font-display font-bold text-gradient">AfroDex</h1>
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Order Book DEX</p>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Africa&apos;s Premier DEX</p>
             </div>
           </div>
           <button
@@ -429,7 +431,14 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="p-4 border-t border-white/5">
         <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>Order Book DEX</span>
+          <a 
+            href="https://afrox.one" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="hover:text-afrodex-orange transition-colors"
+          >
+            Powered by Community of Trust
+          </a>
           <span>Est. 2019</span>
         </div>
       </div>

@@ -9,6 +9,9 @@ import {
   placeOrder, 
   parseAmount, 
   formatAmount,
+  formatDisplayAmount,
+  formatDisplayPrice,
+  formatFullBalance,
   generateNonce,
   getExpirationBlock,
   ZERO_ADDRESS,
@@ -52,25 +55,42 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const baseBalance = balances[baseToken.address.toLowerCase()];
   const quoteBalance = balances[quoteToken.address.toLowerCase()];
 
-  // Calculate total
-  const total = price && amount 
-    ? (parseFloat(price) * parseFloat(amount)).toFixed(8)
-    : '0.00000000';
+  // Calculate total with proper precision for very small numbers
+  const calculateTotal = (): string => {
+    if (!price || !amount) return '0';
+    const priceNum = parseFloat(price);
+    const amountNum = parseFloat(amount);
+    if (isNaN(priceNum) || isNaN(amountNum)) return '0';
+    
+    // Use high precision calculation
+    const result = priceNum * amountNum;
+    // Convert to string without scientific notation
+    if (result === 0) return '0';
+    if (result < 0.000000000000000001) return '0';
+    
+    // Format to 18 decimal places max (ETH precision)
+    return result.toFixed(18).replace(/\.?0+$/, '');
+  };
+  
+  const totalStr = calculateTotal();
+  const totalNum = parseFloat(totalStr) || 0;
+  const totalDisplay = formatDisplayPrice(totalNum);
 
   // Get available balance based on order type
   const getAvailableBalance = () => {
     if (orderTab === 'buy') {
-      // Buying base token, need quote token (ETH)
       return quoteBalance?.exchange 
         ? parseFloat(formatAmount(quoteBalance.exchange, quoteToken.decimals))
         : 0;
     } else {
-      // Selling base token, need base token
       return baseBalance?.exchange 
         ? parseFloat(formatAmount(baseBalance.exchange, baseToken.decimals))
         : 0;
     }
   };
+
+  // Format available balance for display
+  const availableDisplay = formatDisplayAmount(getAvailableBalance());
 
   // Set percentage of available balance
   const setPercentage = (percent: number) => {
@@ -104,7 +124,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
     // Check balance
     const available = getAvailableBalance();
-    const required = orderTab === 'buy' ? priceNum * amountNum : amountNum;
+    const required = orderTab === 'buy' ? totalNum : amountNum;
     
     if (required > available) {
       setError(`Insufficient ${orderTab === 'buy' ? quoteToken.symbol : baseToken.symbol} balance. You need to deposit first.`);
@@ -121,7 +141,17 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
       // Calculate amounts in wei
       const amountBase = parseAmount(amount, baseToken.decimals);
-      const amountQuote = parseAmount(total, quoteToken.decimals);
+      const amountQuote = parseAmount(totalStr, quoteToken.decimals);
+      
+      console.log('Order details:', {
+        price,
+        amount,
+        totalStr,
+        amountBase,
+        amountQuote,
+        baseDecimals: baseToken.decimals,
+        quoteDecimals: quoteToken.decimals
+      });
 
       // Determine order parameters based on side
       // Buy order: want base token, give quote token (ETH)
@@ -166,7 +196,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const isBuy = orderTab === 'buy';
 
   return (
-    <div className="card h-full flex flex-col">
+    <div className="card flex flex-col">
       {/* Header */}
       <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
         <ArrowDownUp className="w-4 h-4 text-afrodex-orange" />
@@ -174,45 +204,58 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
       </h3>
 
       {/* Buy/Sell Toggle */}
-      <div className="tabs mb-4">
+      <div className="flex gap-2 mb-4">
         <button
           onClick={() => setOrderTab('buy')}
-          className={`tab ${orderTab === 'buy' ? 'tab-active !bg-trade-buy' : ''}`}
+          className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${
+            orderTab === 'buy' 
+              ? 'bg-trade-buy text-black' 
+              : 'bg-transparent text-gray-400 hover:text-white'
+          }`}
         >
           Buy
         </button>
         <button
           onClick={() => setOrderTab('sell')}
-          className={`tab ${orderTab === 'sell' ? 'tab-active !bg-trade-sell' : ''}`}
+          className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${
+            orderTab === 'sell' 
+              ? 'bg-trade-sell text-white' 
+              : 'bg-transparent text-gray-400 hover:text-white'
+          }`}
         >
           Sell
         </button>
       </div>
 
       {/* Price Input */}
-      <div className="mb-3">
-        <label className="block text-xs text-gray-500 mb-1.5">
-          Price ({quoteToken.symbol})
-        </label>
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-xs text-gray-500">
+            Price ({quoteToken.symbol})
+          </label>
+          <span className="text-xs text-gray-500">
+            Avail: <span className="text-white">{availableDisplay}</span> {orderTab === 'buy' ? quoteToken.symbol : baseToken.symbol}
+          </span>
+        </div>
         <input
           type="number"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           placeholder="0.00000000"
-          className="input font-mono text-sm"
+          className="input font-mono"
           step="any"
           min="0"
         />
       </div>
 
       {/* Amount Input */}
-      <div className="mb-3">
+      <div className="mb-4">
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs text-gray-500">
             Amount ({baseToken.symbol})
           </label>
           <span className="text-xs text-gray-500">
-            Avail: {getAvailableBalance().toFixed(4)} {isBuy ? quoteToken.symbol : baseToken.symbol}
+            Total in:<span className="text-afrodex-orange font-mono ml-1">{totalDisplay}</span> {quoteToken.symbol}
           </span>
         </div>
         <input
@@ -220,84 +263,58 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.0000"
-          className="input font-mono text-sm"
+          className="input font-mono"
           step="any"
           min="0"
         />
+      </div>
         
-        {/* Percentage Buttons */}
-        <div className="flex gap-1 mt-2">
-          {[0.25, 0.5, 0.75, 1].map((pct) => (
-            <button
-              key={pct}
-              onClick={() => setPercentage(pct)}
-              className="flex-1 py-1 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors"
-            >
-              {pct * 100}%
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Total */}
-      <div className="p-3 bg-afrodex-black-lighter rounded-lg mb-4">
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Total</span>
-          <span className="font-mono font-medium">
-            {total} {quoteToken.symbol}
-          </span>
-        </div>
-      </div>
-
-      {/* Order Summary */}
-      <div className="p-3 bg-afrodex-black-lighter/50 rounded-lg mb-4 text-xs text-gray-500">
-        <p className="mb-1">
-          {isBuy ? 'You will receive' : 'You will pay'}: {amount || '0'} {baseToken.symbol}
-        </p>
-        <p>
-          {isBuy ? 'You will pay' : 'You will receive'}: {total} {quoteToken.symbol}
-        </p>
+      {/* Percentage Buttons */}
+      <div className="flex gap-2 mb-4">
+        {[0.25, 0.5, 0.75, 1].map((pct) => (
+          <button
+            key={pct}
+            onClick={() => setPercentage(pct)}
+            className="flex-1 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-white/10 rounded transition-colors"
+          >
+            {pct * 100}%
+          </button>
+        ))}
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg mb-4 text-xs text-red-400">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
+          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Spacer */}
-      <div className="flex-1" />
-
       {/* Action Button */}
       {!isConnected ? (
-        <button className="btn-secondary w-full" disabled>
-          Connect Wallet to Trade
+        <button className="w-full py-3 rounded-lg font-semibold text-sm bg-gray-700 text-gray-400" disabled>
+          Connect Wallet
         </button>
       ) : (
         <button
           onClick={handlePlaceOrder}
           disabled={loading || !price || !amount || parseFloat(price) <= 0 || parseFloat(amount) <= 0}
-          className={`w-full py-3 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-            isBuy ? 'btn-buy' : 'btn-sell'
+          className={`w-full py-3 rounded-lg font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+            isBuy 
+              ? 'bg-trade-buy/90 hover:bg-trade-buy text-black' 
+              : 'bg-trade-sell/90 hover:bg-trade-sell text-white'
           }`}
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Placing Order...
+              Placing...
             </span>
           ) : (
             `${isBuy ? 'Buy' : 'Sell'} ${baseToken.symbol}`
           )}
         </button>
       )}
-
-      {/* Disclaimer */}
-      <p className="mt-3 text-[10px] text-gray-600 text-center">
-        Ensure you have deposited funds to the exchange before placing orders
-      </p>
     </div>
   );
 }

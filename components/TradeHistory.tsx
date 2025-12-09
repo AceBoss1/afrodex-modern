@@ -1,18 +1,41 @@
 // components/TradeHistory.tsx
 'use client';
 
+import { useState } from 'react';
 import { useTradingStore } from '@/lib/store';
 import { Token } from '@/lib/tokens';
+import { formatOrderBookPrice, formatOrderBookAmount } from '@/lib/exchange';
 import { format } from 'date-fns';
-import { ExternalLink, History, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { ExternalLink, History, ArrowUpRight, ArrowDownRight, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface TradeHistoryProps {
   baseToken: Token;
   quoteToken: Token;
 }
 
+const TRADES_PER_PAGE = 10;
+
 export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProps) {
   const { trades, isLoadingTrades } = useTradingStore();
+  const [currentPage, setCurrentPage] = useState(0);
+
+  const totalPages = Math.ceil(trades.length / TRADES_PER_PAGE);
+  const paginatedTrades = trades.slice(
+    currentPage * TRADES_PER_PAGE,
+    (currentPage + 1) * TRADES_PER_PAGE
+  );
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages - 1) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  const goToPrevPage = () => {
+    if (currentPage > 0) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
 
   if (isLoadingTrades) {
     return (
@@ -57,7 +80,7 @@ export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProp
           </div>
         ) : (
           <div className="divide-y divide-white/5">
-            {trades.map((trade, idx) => (
+            {paginatedTrades.map((trade, idx) => (
               <div
                 key={`${trade.txHash}-${idx}`}
                 className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 py-2 items-center text-xs hover:bg-white/5 transition-colors"
@@ -80,15 +103,21 @@ export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProp
                 </span>
 
                 {/* Price */}
-                <span className={`text-right font-mono ${
-                  trade.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
-                }`}>
-                  {trade.price.toFixed(8)}
+                <span 
+                  className={`text-right font-mono text-[11px] ${
+                    trade.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
+                  }`}
+                  title={trade.price.toString()}
+                >
+                  {formatOrderBookPrice(trade.price)}
                 </span>
 
                 {/* Amount */}
-                <span className="text-right font-mono text-gray-300">
-                  {trade.baseAmount.toFixed(4)}
+                <span 
+                  className="text-right font-mono text-gray-300 text-[11px]"
+                  title={trade.baseAmount.toString()}
+                >
+                  {formatOrderBookAmount(trade.baseAmount)}
                 </span>
 
                 {/* Etherscan Link */}
@@ -107,31 +136,44 @@ export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProp
         )}
       </div>
 
+      {/* Pagination */}
+      {trades.length > TRADES_PER_PAGE && (
+        <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
+          <button
+            onClick={goToPrevPage}
+            disabled={currentPage === 0}
+            className="p-1 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs text-gray-500">
+            Page {currentPage + 1} of {totalPages}
+          </span>
+          <button
+            onClick={goToNextPage}
+            disabled={currentPage >= totalPages - 1}
+            className="p-1 rounded hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Summary Stats */}
       {trades.length > 0 && (
-        <div className="pt-3 mt-2 border-t border-white/5">
-          <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="pt-2 mt-2 border-t border-white/5">
+          <div className="flex justify-between text-xs">
             <div>
-              <span className="text-gray-500">Buy Vol:</span>
+              <span className="text-gray-500">Bids:</span>
               <span className="ml-1 text-trade-buy font-mono">
-                {trades
-                  .filter(t => t.side === 'buy')
-                  .reduce((sum, t) => sum + t.baseAmount, 0)
-                  .toFixed(2)}
+                {trades.filter(t => t.side === 'buy').length}
               </span>
             </div>
             <div>
-              <span className="text-gray-500">Sell Vol:</span>
+              <span className="text-gray-500">Asks:</span>
               <span className="ml-1 text-trade-sell font-mono">
-                {trades
-                  .filter(t => t.side === 'sell')
-                  .reduce((sum, t) => sum + t.baseAmount, 0)
-                  .toFixed(2)}
+                {trades.filter(t => t.side === 'sell').length}
               </span>
-            </div>
-            <div className="text-right">
-              <span className="text-gray-500">Trades:</span>
-              <span className="ml-1 font-medium">{trades.length}</span>
             </div>
           </div>
         </div>

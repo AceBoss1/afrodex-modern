@@ -433,6 +433,134 @@ export function formatAmount(amount: string, decimals: number): string {
 }
 
 /**
+ * Format amount for display - shows FULL numbers, no abbreviations
+ * Large numbers shown with commas for readability
+ * Small numbers show appropriate decimals
+ */
+export function formatDisplayAmount(amount: number | string): string {
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  
+  if (isNaN(num) || num === 0) return '0';
+  
+  const absNum = Math.abs(num);
+  
+  // For very large numbers (>= 1), show as integer with commas (no decimals)
+  if (absNum >= 1000000) {
+    return Math.round(num).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+  
+  // For numbers >= 1, show up to 4 decimals
+  if (absNum >= 1) {
+    return num.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  }
+  
+  // For small numbers, show appropriate decimals
+  if (absNum >= 0.0001) {
+    return num.toFixed(6);
+  }
+  
+  // For very small numbers, show up to 12 decimals
+  return num.toFixed(12).replace(/\.?0+$/, '');
+}
+
+/**
+ * Format price for display - handles very small prices like 0.000000009998
+ * Shows ALL significant digits for small prices (up to 18 decimals)
+ */
+export function formatDisplayPrice(price: number | string): string {
+  const num = typeof price === 'string' ? parseFloat(price) : price;
+  
+  if (isNaN(num) || num === 0) return '0';
+  
+  const absNum = Math.abs(num);
+  
+  // For prices >= 1, show reasonable decimals
+  if (absNum >= 1) {
+    return num.toFixed(4);
+  }
+  
+  // For prices >= 0.0001, show 8 decimals
+  if (absNum >= 0.0001) {
+    return num.toFixed(8);
+  }
+  
+  // For prices >= 0.000000001 (9 zeros), show 12 decimals
+  if (absNum >= 0.000000001) {
+    return num.toFixed(12);
+  }
+  
+  // For very small prices, show up to 18 decimals (full ETH precision)
+  // Find first significant digit and show all
+  const str = num.toFixed(18);
+  
+  // Remove trailing zeros but keep significant digits
+  let trimmed = str.replace(/0+$/, '');
+  if (trimmed.endsWith('.')) {
+    trimmed = trimmed + '0';
+  }
+  
+  return trimmed;
+}
+
+/**
+ * Format balance for input display - full precision without abbreviation
+ */
+export function formatFullBalance(amount: string, decimals: number): string {
+  try {
+    const formatted = formatUnits(amount, decimals);
+    const num = parseFloat(formatted);
+    if (num === 0) return '0';
+    // Return full precision
+    return formatted;
+  } catch {
+    return '0';
+  }
+}
+
+/**
+ * Format for order book display - needs to fit in column
+ * Price: up to 14 decimal places for very small prices
+ * Amount: full number with commas, no decimals for large numbers
+ */
+export function formatOrderBookPrice(price: number): string {
+  if (price === 0) return '0';
+  
+  const absPrice = Math.abs(price);
+  
+  if (absPrice >= 1) {
+    return price.toFixed(6);
+  }
+  if (absPrice >= 0.000001) {
+    return price.toFixed(10);
+  }
+  // For very small prices like 0.000000009998
+  return price.toFixed(14);
+}
+
+/**
+ * Format order book amount - full numbers, no abbreviations
+ * Uses commas for readability on large numbers
+ */
+export function formatOrderBookAmount(amount: number): string {
+  if (amount === 0) return '0';
+  
+  const absAmount = Math.abs(amount);
+  
+  // For large numbers, show as integer with commas
+  if (absAmount >= 1000) {
+    return Math.round(amount).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+  
+  // For numbers >= 1, show up to 2 decimals
+  if (absAmount >= 1) {
+    return amount.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  }
+  
+  // For small numbers
+  return amount.toFixed(6);
+}
+
+/**
  * Parse amount to wei with specified decimals
  */
 export function parseAmount(amount: string, decimals: number): string {
@@ -486,6 +614,191 @@ export async function getExpirationBlock(
 ): Promise<string> {
   const currentBlock = await provider.getBlockNumber();
   return (currentBlock + blocksUntilExpiry).toString();
+}
+
+// ============================================
+// Historical Event Fetching
+// ============================================
+
+/**
+ * Fetch historical Order events from the blockchain
+ */
+export async function fetchOrderEvents(
+  provider: Provider,
+  baseTokenAddress: string,
+  quoteTokenAddress: string,
+  fromBlock: number = 0,
+  toBlock: number | 'latest' = 'latest'
+): Promise<Order[]> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    // Get current block if toBlock is 'latest'
+    const currentBlock = await provider.getBlockNumber();
+    const endBlock = toBlock === 'latest' ? currentBlock : toBlock;
+    
+    // Limit range to avoid RPC timeouts (fetch last ~50000 blocks max)
+    const startBlock = Math.max(fromBlock, endBlock - 50000);
+    
+    // Fetch Order events
+    const orderFilter = contract.filters.Order();
+    const events = await contract.queryFilter(orderFilter, startBlock, endBlock);
+    
+    const orders: Order[] = [];
+    
+    for (const event of events) {
+      const args = (event as any).args;
+      if (!args) continue;
+      
+      const tokenGet = args.tokenGet?.toLowerCase();
+      const tokenGive = args.tokenGive?.toLowerCase();
+      const baseAddr = baseTokenAddress.toLowerCase();
+      const quoteAddr = quoteTokenAddress.toLowerCase();
+      
+      // Filter for our trading pair
+      const isBuyOrder = tokenGet === baseAddr && tokenGive === quoteAddr;
+      const isSellOrder = tokenGet === quoteAddr && tokenGive === baseAddr;
+      
+      if (!isBuyOrder && !isSellOrder) continue;
+      
+      const order: Order = {
+        tokenGet: args.tokenGet,
+        amountGet: args.amountGet.toString(),
+        tokenGive: args.tokenGive,
+        amountGive: args.amountGive.toString(),
+        expires: args.expires.toString(),
+        nonce: args.nonce.toString(),
+        user: args.user,
+        side: isBuyOrder ? 'buy' : 'sell',
+      };
+      
+      // Check if order is still valid (not expired, not fully filled)
+      const blockNum = await provider.getBlockNumber();
+      if (parseInt(order.expires) > blockNum) {
+        // Check available volume
+        const filled = await getAmountFilled(provider, order);
+        const amountGet = BigInt(order.amountGet);
+        const filledAmount = BigInt(filled);
+        
+        if (filledAmount < amountGet) {
+          order.amountFilled = filled;
+          order.availableVolume = (amountGet - filledAmount).toString();
+          orders.push(order);
+        }
+      }
+    }
+    
+    return orders;
+  } catch (error) {
+    console.error('Error fetching order events:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetch historical Trade events from the blockchain
+ */
+export async function fetchTradeEvents(
+  provider: Provider,
+  baseTokenAddress: string,
+  quoteTokenAddress: string,
+  baseDecimals: number,
+  quoteDecimals: number,
+  fromBlock: number = 0,
+  toBlock: number | 'latest' = 'latest'
+): Promise<Trade[]> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    const currentBlock = await provider.getBlockNumber();
+    const endBlock = toBlock === 'latest' ? currentBlock : toBlock;
+    const startBlock = Math.max(fromBlock, endBlock - 50000);
+    
+    // Fetch Trade events
+    const tradeFilter = contract.filters.Trade();
+    const events = await contract.queryFilter(tradeFilter, startBlock, endBlock);
+    
+    const trades: Trade[] = [];
+    
+    for (const event of events) {
+      const args = (event as any).args;
+      if (!args) continue;
+      
+      const tokenGet = args.tokenGet?.toLowerCase();
+      const tokenGive = args.tokenGive?.toLowerCase();
+      const baseAddr = baseTokenAddress.toLowerCase();
+      const quoteAddr = quoteTokenAddress.toLowerCase();
+      
+      // Filter for our trading pair
+      const isBuyTrade = tokenGet === baseAddr && tokenGive === quoteAddr;
+      const isSellTrade = tokenGet === quoteAddr && tokenGive === baseAddr;
+      
+      if (!isBuyTrade && !isSellTrade) continue;
+      
+      // Get block timestamp
+      const block = await provider.getBlock(event.blockNumber);
+      const timestamp = block?.timestamp || Math.floor(Date.now() / 1000);
+      
+      const amountGet = parseFloat(formatUnits(args.amountGet.toString(), isBuyTrade ? baseDecimals : quoteDecimals));
+      const amountGive = parseFloat(formatUnits(args.amountGive.toString(), isBuyTrade ? quoteDecimals : baseDecimals));
+      
+      const trade: Trade = {
+        txHash: event.transactionHash,
+        blockNumber: event.blockNumber,
+        timestamp: Number(timestamp),
+        tokenGet: args.tokenGet,
+        amountGet: args.amountGet.toString(),
+        tokenGive: args.tokenGive,
+        amountGive: args.amountGive.toString(),
+        maker: args.get || args.maker || '',
+        taker: args.give || args.taker || '',
+        side: isBuyTrade ? 'buy' : 'sell',
+        price: isBuyTrade ? amountGive / amountGet : amountGet / amountGive,
+        baseAmount: isBuyTrade ? amountGet : amountGive,
+        quoteAmount: isBuyTrade ? amountGive : amountGet,
+      };
+      
+      trades.push(trade);
+    }
+    
+    // Sort by timestamp descending (most recent first)
+    trades.sort((a, b) => b.timestamp - a.timestamp);
+    
+    return trades;
+  } catch (error) {
+    console.error('Error fetching trade events:', error);
+    return [];
+  }
+}
+
+/**
+ * Get amount already filled for an order
+ */
+async function getAmountFilled(provider: Provider, order: Order): Promise<string> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    // Calculate order hash
+    const orderHash = keccak256(
+      solidityPacked(
+        ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
+        [
+          EXCHANGE_ADDRESS,
+          order.tokenGet,
+          order.amountGet,
+          order.tokenGive,
+          order.amountGive,
+          order.expires,
+          order.nonce
+        ]
+      )
+    );
+    
+    const filled = await contract.orderFills(order.user, orderHash);
+    return filled.toString();
+  } catch {
+    return '0';
+  }
 }
 
 export { ZERO_ADDRESS };
