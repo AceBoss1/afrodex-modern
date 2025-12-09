@@ -226,8 +226,8 @@ export default function TradePage() {
 
           {/* Chart + Recent Trades + Order Book Row */}
           <div className="flex-1 grid grid-cols-12 gap-2 p-2 overflow-hidden">
-            {/* Chart + Recent Trades Column - Reduced width */}
-            <div className="col-span-12 lg:col-span-6 flex flex-col gap-2 min-h-0">
+            {/* Chart + Recent Trades Column - Wider */}
+            <div className="col-span-12 lg:col-span-8 flex flex-col gap-2 min-h-0">
               {/* Chart */}
               <div className="flex-[2] min-h-[200px]">
                 <TradingChart baseToken={baseToken} quoteToken={quoteToken} />
@@ -239,8 +239,8 @@ export default function TradePage() {
               </div>
             </div>
 
-            {/* Order Book Column - Increased width */}
-            <div className="col-span-12 lg:col-span-6 min-h-0">
+            {/* Order Book Column - Narrower */}
+            <div className="col-span-12 lg:col-span-4 min-h-0">
               <OrderBook baseToken={baseToken} quoteToken={quoteToken} />
             </div>
           </div>
