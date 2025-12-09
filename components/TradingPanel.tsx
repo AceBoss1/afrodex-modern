@@ -88,9 +88,22 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         : 0;
     }
   };
+  
+  // Get available balance string for display (preserves precision)
+  const getAvailableBalanceStr = () => {
+    if (orderTab === 'buy') {
+      return quoteBalance?.exchange 
+        ? formatAmount(quoteBalance.exchange, quoteToken.decimals)
+        : '0';
+    } else {
+      return baseBalance?.exchange 
+        ? formatAmount(baseBalance.exchange, baseToken.decimals)
+        : '0';
+    }
+  };
 
   // Format available balance for display
-  const availableDisplay = formatDisplayAmount(getAvailableBalance());
+  const availableDisplay = formatDisplayAmount(getAvailableBalanceStr());
 
   // Set percentage of available balance
   const setPercentage = (percent: number) => {

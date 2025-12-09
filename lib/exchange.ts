@@ -438,13 +438,29 @@ export function formatAmount(amount: string, decimals: number): string {
  * Small numbers show appropriate decimals
  */
 export function formatDisplayAmount(amount: number | string): string {
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  // Handle string input (might be very large number from formatUnits)
+  if (typeof amount === 'string') {
+    const num = parseFloat(amount);
+    if (isNaN(num) || num === 0) return '0';
+    
+    // For very large numbers, parse the string directly to avoid precision loss
+    if (num >= 1e15) {
+      // Split at decimal point
+      const parts = amount.split('.');
+      const intPart = parts[0];
+      // Add commas to integer part
+      return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+    
+    return formatDisplayAmount(num);
+  }
   
+  const num = amount;
   if (isNaN(num) || num === 0) return '0';
   
   const absNum = Math.abs(num);
   
-  // For very large numbers (>= 1), show as integer with commas (no decimals)
+  // For very large numbers (>= 1 million), show as integer with commas
   if (absNum >= 1000000) {
     return Math.round(num).toLocaleString('en-US', { maximumFractionDigits: 0 });
   }
@@ -676,7 +692,7 @@ export async function fetchOrderEvents(
       const blockNum = await provider.getBlockNumber();
       if (parseInt(order.expires) > blockNum) {
         // Check available volume
-        const filled = await getAmountFilled(provider, order);
+        const filled = await getOrderFillAmount(provider, order);
         const amountGet = BigInt(order.amountGet);
         const filledAmount = BigInt(filled);
         
@@ -772,9 +788,9 @@ export async function fetchTradeEvents(
 }
 
 /**
- * Get amount already filled for an order
+ * Get amount already filled for an unsigned order (used in historical fetching)
  */
-async function getAmountFilled(provider: Provider, order: Order): Promise<string> {
+async function getOrderFillAmount(provider: Provider, order: Order): Promise<string> {
   const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
   
   try {
