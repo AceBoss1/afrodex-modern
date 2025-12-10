@@ -11,6 +11,7 @@ export interface Token {
   website?: string;
   etherscan?: string;
   tracker?: string;
+  cmcId?: string; // CoinMarketCap ID for API integration
   isCustom?: boolean;
 }
 
@@ -27,6 +28,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     description: 'Ethereum - The native cryptocurrency of the Ethereum blockchain.',
     website: 'https://ethereum.org',
     etherscan: 'https://etherscan.io',
+    cmcId: '1027',
   },
   AfroX: {
     symbol: 'AfroX',
@@ -38,6 +40,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     website: 'https://afrox.one',
     etherscan: 'https://etherscan.io/token/0x08130635368AA28b217a4dfb68E1bF8dC525621C',
     tracker: 'https://coinmarketcap.com/currencies/afrodex/',
+    cmcId: '5765',
   },
   AFDLT: {
     symbol: 'AFDLT',
@@ -48,6 +51,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     description: 'AFDLT powers research, innovation, and decentralized governance across the AfroDex Labs ecosystem.',
     etherscan: 'https://etherscan.io/token/0xD8a8843b0a5aba6B030E92B3F4d669FaD8A5BE50',
     tracker: 'https://coinmarketcap.com/currencies/afrodex-labs-token/',
+    cmcId: '7546',
   },
   PFARM: {
     symbol: 'PFARM',
@@ -68,6 +72,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     description: 'FREE Coin is one of the largest distributed ERC-20 tokens, designed to fuel global crypto adoption.',
     etherscan: 'https://etherscan.io/token/0x2F141Ce366a2462f02cEA3D12CF93E4DCa49e4Fd',
     tracker: 'https://coinmarketcap.com/currencies/free-coin/',
+    cmcId: '3916',
   },
   PLAAS: {
     symbol: 'PLAAS',
@@ -78,6 +83,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     description: 'PLAAS enables farmers to integrate blockchain for livestock management, logistics, and data analytics.',
     etherscan: 'https://etherscan.io/token/0x60571E95E12c78CbA5223042692908f0649435a5',
     tracker: 'https://coinmarketcap.com/currencies/plaas-farmers-token/',
+    cmcId: '5645',
   },
   LWBT: {
     symbol: 'LWBT',
@@ -119,6 +125,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     website: 'https://tether.to',
     etherscan: 'https://etherscan.io/token/0xdAC17F958D2ee523a2206206994597C13D831ec7',
     tracker: 'https://coinmarketcap.com/currencies/tether/',
+    cmcId: '825',
   },
   BUSD: {
     symbol: 'BUSD',
@@ -129,6 +136,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     description: 'Binance USD - A regulated stablecoin issued by Binance.',
     etherscan: 'https://etherscan.io/token/0x4fabb145d64652a948d72533023f6e7a623c7c53',
     tracker: 'https://coinmarketcap.com/currencies/binance-usd/',
+    cmcId: '4687',
   },
   DAI: {
     symbol: 'DAI',
@@ -140,6 +148,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     website: 'https://makerdao.com',
     etherscan: 'https://etherscan.io/token/0x6B175474E89094C44Da98b954EedeAC495271d0F',
     tracker: 'https://coinmarketcap.com/currencies/multi-collateral-dai/',
+    cmcId: '4943',
   },
   WETH: {
     symbol: 'WETH',
@@ -150,6 +159,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     description: 'Wrapped Ether - An ERC-20 representation of ETH for DeFi compatibility.',
     etherscan: 'https://etherscan.io/token/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
     tracker: 'https://coinmarketcap.com/currencies/weth/',
+    cmcId: '2396',
   },
 };
 
