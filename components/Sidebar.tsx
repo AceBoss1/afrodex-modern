@@ -430,13 +430,23 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="p-4 border-t border-white/5">
-        <a 
-          href="/guide"
-          className="flex items-center gap-2 text-xs text-gray-400 hover:text-afrodex-orange transition-colors mb-3"
-        >
-          <span>📖</span>
-          User Guide
-        </a>
+        <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
+          <a 
+            href="/guide"
+            className="flex items-center gap-1 hover:text-afrodex-orange transition-colors"
+          >
+            <span>📖</span>
+            User Guide
+          </a>
+          <span className="text-gray-500">|</span>
+          <a 
+            href="/api"
+            className="flex items-center gap-1 hover:text-afrodex-orange transition-colors"
+          >
+            <span>📊</span>
+            Rest API
+          </a>
+        </div>
         <div className="flex items-center justify-between text-xs text-gray-500">
           <a 
             href="https://afrox.one" 

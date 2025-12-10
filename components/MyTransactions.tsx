@@ -351,6 +351,34 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
         {/* Orders Tab */}
         {activeTab === 'orders' && (
           <>
+            {/* Clear All Orders Button - shown when there are orders */}
+            {userOrders.length > 0 && (
+              <div className="mb-2 p-2 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-yellow-400">
+                    <AlertCircle className="w-3 h-3" />
+                    <span>If trades fail, clear old orders and recreate</span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (confirm('Delete all your orders? You will need to recreate them.')) {
+                        const supabase = getSupabaseClient();
+                        if (supabase && address) {
+                          await supabase
+                            .from('orders')
+                            .delete()
+                            .eq('user_address', address.toLowerCase());
+                          setUserOrders([]);
+                        }
+                      }
+                    }}
+                    className="text-xs px-2 py-1 bg-yellow-600/30 hover:bg-yellow-600/50 rounded text-yellow-400 transition-colors"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+            )}
             {userOrders.length === 0 ? (
               <div className="text-center py-6 text-gray-500 text-xs">
                 No open orders

@@ -220,36 +220,65 @@ export async function withdrawToken(
 
 /**
  * Generate order hash for signing (EtherDelta uses sha256)
+ * Contract: sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce)
  */
 export function getOrderHash(order: Order): string {
-  // EtherDelta/ForkDelta uses sha256, not keccak256
+  // Ensure all values are properly formatted
+  const contractAddr = EXCHANGE_ADDRESS.toLowerCase();
+  const tokenGet = order.tokenGet.toLowerCase();
+  const tokenGive = order.tokenGive.toLowerCase();
+  
+  // Convert amounts to BigInt for proper uint256 encoding
+  const amountGet = BigInt(order.amountGet);
+  const amountGive = BigInt(order.amountGive);
+  const expires = BigInt(order.expires);
+  const nonce = BigInt(order.nonce);
+  
+  // EtherDelta/ForkDelta uses sha256 with abi.encodePacked
   const packed = solidityPacked(
     ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
     [
-      EXCHANGE_ADDRESS,
-      order.tokenGet,
-      order.amountGet,
-      order.tokenGive,
-      order.amountGive,
-      order.expires,
-      order.nonce,
+      contractAddr,
+      tokenGet,
+      amountGet,
+      tokenGive,
+      amountGive,
+      expires,
+      nonce,
     ]
   );
   
   // Use sha256 for EtherDelta compatibility
-  return ethers.sha256(packed);
+  const hash = ethers.sha256(packed);
+  
+  console.log('Order hash calculation:', {
+    contractAddr,
+    tokenGet,
+    amountGet: amountGet.toString(),
+    tokenGive,
+    amountGive: amountGive.toString(),
+    expires: expires.toString(),
+    nonce: nonce.toString(),
+    packedLength: packed.length,
+    hash,
+  });
+  
+  return hash;
 }
 
 /**
  * Sign an order (EtherDelta style)
+ * The contract verifies: ecrecover(sha3("\x19Ethereum Signed Message:\n32", hash), v, r, s) == user
  */
 export async function signOrder(
   signer: Signer,
   order: Order
 ): Promise<SignedOrder> {
   const hash = getOrderHash(order);
+  const signerAddress = await signer.getAddress();
   
-  // Sign the hash with personal_sign (adds Ethereum prefix)
+  // Sign the hash with personal_sign (adds Ethereum prefix automatically)
+  // This produces: sign(keccak256("\x19Ethereum Signed Message:\n32" + hash))
   const signature = await signer.signMessage(ethers.getBytes(hash));
   const sig = ethers.Signature.from(signature);
   
@@ -257,6 +286,21 @@ export async function signOrder(
   let v = sig.v;
   if (v < 27) {
     v += 27;
+  }
+  
+  // Verify signature can be recovered
+  const recoveredAddress = ethers.verifyMessage(ethers.getBytes(hash), signature);
+  console.log('Signature verification:', {
+    signerAddress,
+    recoveredAddress,
+    match: signerAddress.toLowerCase() === recoveredAddress.toLowerCase(),
+    v,
+    r: sig.r,
+    s: sig.s,
+  });
+  
+  if (signerAddress.toLowerCase() !== recoveredAddress.toLowerCase()) {
+    throw new Error('Signature verification failed - recovered address does not match signer');
   }
   
   return {
@@ -348,6 +392,82 @@ export async function executeTrade(
 }
 
 /**
+ * Verify an order's signature against the contract
+ * Returns the available volume (0 if invalid signature or filled)
+ */
+export async function verifyOrderSignature(
+  provider: Provider,
+  order: SignedOrder
+): Promise<{ valid: boolean; availableVolume: string; reason?: string }> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    // Recalculate hash to compare
+    const expectedHash = getOrderHash(order);
+    const hashMatch = expectedHash === order.hash;
+    
+    console.log('Verifying order signature:', {
+      storedHash: order.hash,
+      expectedHash,
+      hashMatch,
+      user: order.user,
+      v: order.v,
+    });
+    
+    if (!hashMatch) {
+      return { 
+        valid: false, 
+        availableVolume: '0',
+        reason: `Hash mismatch: stored=${order.hash?.slice(0, 10)}... expected=${expectedHash.slice(0, 10)}...`
+      };
+    }
+    
+    const availableVolume = await contract.availableVolume(
+      order.tokenGet,
+      order.amountGet,
+      order.tokenGive,
+      order.amountGive,
+      order.expires,
+      order.nonce,
+      order.user,
+      order.v,
+      order.r,
+      order.s
+    );
+    
+    const volumeStr = availableVolume.toString();
+    
+    if (volumeStr === '0') {
+      // Check current block to see if expired
+      const currentBlock = await provider.getBlockNumber();
+      if (parseInt(order.expires) <= currentBlock) {
+        return { valid: false, availableVolume: '0', reason: 'Order expired' };
+      }
+      
+      // Check if order was on-chain submitted
+      const orderHash = ethers.sha256(
+        solidityPacked(
+          ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
+          [EXCHANGE_ADDRESS, order.tokenGet, BigInt(order.amountGet), order.tokenGive, BigInt(order.amountGive), BigInt(order.expires), BigInt(order.nonce)]
+        )
+      );
+      
+      const isOnChain = await contract.orders(order.user, orderHash);
+      if (!isOnChain) {
+        return { valid: false, availableVolume: '0', reason: 'Invalid signature - order not recognized by contract' };
+      }
+      
+      return { valid: false, availableVolume: '0', reason: 'Order fully filled' };
+    }
+    
+    return { valid: true, availableVolume: volumeStr };
+  } catch (error: any) {
+    console.error('Error verifying order:', error);
+    return { valid: false, availableVolume: '0', reason: error.message };
+  }
+}
+
+/**
  * Cancel an order
  */
 export async function cancelOrder(
@@ -415,9 +535,25 @@ export async function preTradeCheck(
 ): Promise<{ canTrade: boolean; reason?: string }> {
   const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
   
+  console.log('preTradeCheck - Order details:', {
+    tokenGet: order.tokenGet,
+    amountGet: order.amountGet,
+    tokenGive: order.tokenGive,
+    amountGive: order.amountGive,
+    expires: order.expires,
+    nonce: order.nonce,
+    user: order.user,
+    v: order.v,
+    r: order.r,
+    s: order.s,
+    hash: order.hash,
+  });
+  
   try {
     // 1. Check if order is expired
     const currentBlock = await provider.getBlockNumber();
+    console.log('Current block:', currentBlock, 'Order expires:', order.expires);
+    
     if (parseInt(order.expires) <= currentBlock) {
       return { canTrade: false, reason: `Order expired (block ${order.expires} < current ${currentBlock})` };
     }
@@ -425,6 +561,7 @@ export async function preTradeCheck(
     // 2. Check available volume (also validates signature)
     let availableVolume;
     try {
+      console.log('Calling availableVolume...');
       availableVolume = await contract.availableVolume(
         order.tokenGet,
         order.amountGet,
@@ -437,6 +574,7 @@ export async function preTradeCheck(
         order.r,
         order.s
       );
+      console.log('availableVolume result:', availableVolume.toString());
     } catch (err: any) {
       console.error('availableVolume call failed:', err);
       return { canTrade: false, reason: `Contract call failed: ${err.message}` };
@@ -445,15 +583,23 @@ export async function preTradeCheck(
     if (availableVolume.toString() === '0') {
       // Check if maker has deposited tokens
       const makerBalance = await contract.balanceOf(order.tokenGive, order.user);
+      console.log('Maker balance of tokenGive:', makerBalance.toString());
+      
       if (makerBalance.toString() === '0') {
         return { canTrade: false, reason: `Maker has not deposited tokens (balance: 0)` };
       }
+      
+      // Recalculate hash to verify
+      const recalculatedHash = getOrderHash(order);
+      console.log('Recalculated hash:', recalculatedHash);
+      console.log('Stored hash:', order.hash);
+      console.log('Hash match:', recalculatedHash === order.hash);
       
       // Check if order was cancelled
       // If volume is 0 but maker has balance, likely invalid signature
       return { 
         canTrade: false, 
-        reason: `Invalid signature or order filled. This order was likely signed with incorrect parameters. Delete and create new order.` 
+        reason: `Invalid signature or order filled. Hash match: ${recalculatedHash === order.hash}. Delete and create new order.` 
       };
     }
 
