@@ -3,27 +3,62 @@ import { ethers, Contract, Provider, Log } from 'ethers';
 import { EXCHANGE_ADDRESS, Order, Trade, calculateOrderPrice, formatAmount } from './exchange';
 import { EXCHANGE_ABI } from './abi';
 import { Token, ZERO_ADDRESS } from './tokens';
+import { isSupabaseConfigured, getOrdersFromDb, getTradesFromDb, DbOrder, DbTrade } from './supabase';
 
 // Cache for fetched data
 const orderCache = new Map<string, { orders: { buyOrders: Order[]; sellOrders: Order[] }; timestamp: number }>();
 const tradeCache = new Map<string, { trades: Trade[]; timestamp: number }>();
 const CACHE_DURATION = 30000; // 30 seconds
 
-// Block range to scan (increase for more history)
-const ORDER_BLOCK_RANGE = 50000; // ~1 week of blocks
-const TRADE_BLOCK_RANGE = 100000; // ~2 weeks of blocks
+// Block range to scan
+const ORDER_BLOCK_RANGE = 50000;
+const TRADE_BLOCK_RANGE = 100000;
 
-/**
- * Get cache key for a trading pair
- */
 function getCacheKey(baseToken: Token, quoteToken: Token): string {
   return `${baseToken.address.toLowerCase()}-${quoteToken.address.toLowerCase()}`;
 }
 
 /**
- * Fetch orders from contract events
- * Note: EtherDelta orders require off-chain signature. This fetches on-chain order events
- * for reference but real order books typically use an off-chain order relay.
+ * Convert DB order to Order type
+ */
+function dbOrderToOrder(dbOrder: DbOrder, baseToken: Token, quoteToken: Token): Order {
+  return {
+    tokenGet: dbOrder.token_get,
+    amountGet: dbOrder.amount_get,
+    tokenGive: dbOrder.token_give,
+    amountGive: dbOrder.amount_give,
+    expires: dbOrder.expires,
+    nonce: dbOrder.nonce,
+    user: dbOrder.user_address,
+    availableVolume: dbOrder.amount_get,
+    side: dbOrder.side,
+    price: dbOrder.price,
+  };
+}
+
+/**
+ * Convert DB trade to Trade type
+ */
+function dbTradeToTrade(dbTrade: DbTrade): Trade {
+  return {
+    txHash: dbTrade.tx_hash,
+    blockNumber: dbTrade.block_number,
+    timestamp: dbTrade.block_timestamp ? new Date(dbTrade.block_timestamp).getTime() / 1000 : Date.now() / 1000,
+    tokenGet: dbTrade.token_get,
+    amountGet: dbTrade.amount_get,
+    tokenGive: dbTrade.token_give,
+    amountGive: dbTrade.amount_give,
+    maker: dbTrade.maker,
+    taker: dbTrade.taker,
+    price: dbTrade.price,
+    side: dbTrade.side,
+    baseAmount: dbTrade.base_amount,
+    quoteAmount: dbTrade.quote_amount,
+  };
+}
+
+/**
+ * Fetch orders - tries Supabase first, falls back to blockchain
  */
 export async function fetchOrders(
   provider: Provider,
@@ -33,7 +68,6 @@ export async function fetchOrders(
 ): Promise<{ buyOrders: Order[]; sellOrders: Order[] }> {
   const cacheKey = getCacheKey(baseToken, quoteToken);
   
-  // Check cache
   if (useCache) {
     const cached = orderCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -41,19 +75,49 @@ export async function fetchOrders(
     }
   }
 
+  // Try Supabase first
+  if (isSupabaseConfigured()) {
+    try {
+      console.log('Fetching orders from Supabase...');
+      const dbOrders = await getOrdersFromDb(baseToken.address, ZERO_ADDRESS);
+      
+      if (dbOrders.length > 0) {
+        const buyOrders: Order[] = [];
+        const sellOrders: Order[] = [];
+        
+        for (const dbOrder of dbOrders) {
+          const order = dbOrderToOrder(dbOrder, baseToken, quoteToken);
+          if (dbOrder.side === 'buy') {
+            buyOrders.push(order);
+          } else {
+            sellOrders.push(order);
+          }
+        }
+        
+        const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
+        const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
+        
+        console.log(`Got ${sortedBuyOrders.length} buy, ${sortedSellOrders.length} sell orders from Supabase`);
+        
+        const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
+        orderCache.set(cacheKey, { orders: result, timestamp: Date.now() });
+        return result;
+      }
+    } catch (err) {
+      console.error('Supabase order fetch failed, falling back to blockchain:', err);
+    }
+  }
+
+  // Fallback to blockchain
   try {
     const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
     const currentBlock = await provider.getBlockNumber();
-    
-    // Fetch Order events (increased range for more history)
     const fromBlock = Math.max(0, currentBlock - ORDER_BLOCK_RANGE);
     
-    console.log(`Fetching orders from block ${fromBlock} to ${currentBlock}`);
+    console.log(`Fetching orders from blockchain blocks ${fromBlock} to ${currentBlock}`);
     
     const orderFilter = contract.filters.Order();
     const orderEvents = await contract.queryFilter(orderFilter, fromBlock, 'latest');
-    
-    console.log(`Found ${orderEvents.length} order events`);
     
     const buyOrders: Order[] = [];
     const sellOrders: Order[] = [];
@@ -70,7 +134,6 @@ export async function fetchOrders(
       const nonce = log.args[5].toString();
       const user = log.args[6] as string;
       
-      // Check if this order is for our trading pair
       const isBuyOrder = 
         tokenGet.toLowerCase() === baseToken.address.toLowerCase() &&
         tokenGive.toLowerCase() === quoteToken.address.toLowerCase();
@@ -80,11 +143,7 @@ export async function fetchOrders(
         tokenGive.toLowerCase() === baseToken.address.toLowerCase();
       
       if (!isBuyOrder && !isSellOrder) continue;
-      
-      // Check if order has expired (using block number)
       if (parseInt(expires) <= currentBlock) continue;
-      
-      // Skip orders with zero amounts (invalid)
       if (amountGet === '0' || amountGive === '0') continue;
       
       const order: Order = {
@@ -95,17 +154,11 @@ export async function fetchOrders(
         expires,
         nonce,
         user,
-        availableVolume: amountGet, // Simplified - would need signature to get actual available
+        availableVolume: amountGet,
         side: isBuyOrder ? 'buy' : 'sell',
       };
       
-      // Calculate price
-      order.price = calculateOrderPrice(
-        order,
-        baseToken.decimals,
-        quoteToken.decimals,
-        baseToken.address
-      );
+      order.price = calculateOrderPrice(order, baseToken.decimals, quoteToken.decimals, baseToken.address);
       
       if (isBuyOrder) {
         buyOrders.push(order);
@@ -114,15 +167,12 @@ export async function fetchOrders(
       }
     }
     
-    // Sort orders
     const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
     const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
     
-    console.log(`Processed ${sortedBuyOrders.length} buy orders, ${sortedSellOrders.length} sell orders`);
+    console.log(`Got ${sortedBuyOrders.length} buy, ${sortedSellOrders.length} sell orders from blockchain`);
     
     const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
-    
-    // Update cache
     orderCache.set(cacheKey, { orders: result, timestamp: Date.now() });
     
     return result;
@@ -133,7 +183,7 @@ export async function fetchOrders(
 }
 
 /**
- * Fetch trade history from contract events
+ * Fetch trades - tries Supabase first, falls back to blockchain
  */
 export async function fetchTrades(
   provider: Provider,
@@ -144,7 +194,6 @@ export async function fetchTrades(
 ): Promise<Trade[]> {
   const cacheKey = getCacheKey(baseToken, quoteToken);
   
-  // Check cache
   if (useCache) {
     const cached = tradeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -152,23 +201,36 @@ export async function fetchTrades(
     }
   }
 
+  // Try Supabase first
+  if (isSupabaseConfigured()) {
+    try {
+      console.log('Fetching trades from Supabase...');
+      const dbTrades = await getTradesFromDb(baseToken.address, ZERO_ADDRESS, limit);
+      
+      if (dbTrades.length > 0) {
+        const trades = dbTrades.map(dbTradeToTrade);
+        console.log(`Got ${trades.length} trades from Supabase`);
+        tradeCache.set(cacheKey, { trades, timestamp: Date.now() });
+        return trades;
+      }
+    } catch (err) {
+      console.error('Supabase trade fetch failed, falling back to blockchain:', err);
+    }
+  }
+
+  // Fallback to blockchain
   try {
     const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
     const currentBlock = await provider.getBlockNumber();
-    
-    // Fetch Trade events (increased range for more history)
     const fromBlock = Math.max(0, currentBlock - TRADE_BLOCK_RANGE);
     
-    console.log(`Fetching trades from block ${fromBlock} to ${currentBlock}`);
+    console.log(`Fetching trades from blockchain blocks ${fromBlock} to ${currentBlock}`);
     
     const tradeFilter = contract.filters.Trade();
     const tradeEvents = await contract.queryFilter(tradeFilter, fromBlock, 'latest');
     
-    console.log(`Found ${tradeEvents.length} trade events`);
-    
     const trades: Trade[] = [];
     
-    // Process in reverse order (newest first)
     for (const event of [...tradeEvents].reverse()) {
       if (trades.length >= limit) break;
       
@@ -179,10 +241,9 @@ export async function fetchTrades(
       const amountGet = log.args[1].toString();
       const tokenGive = log.args[2] as string;
       const amountGive = log.args[3].toString();
-      const maker = log.args[4] as string; // 'get' address
-      const taker = log.args[5] as string; // 'give' address
+      const maker = log.args[4] as string;
+      const taker = log.args[5] as string;
       
-      // Check if trade is for our pair
       const isBaseGet = tokenGet.toLowerCase() === baseToken.address.toLowerCase();
       const isQuoteGet = tokenGet.toLowerCase() === quoteToken.address.toLowerCase();
       const isBaseGive = tokenGive.toLowerCase() === baseToken.address.toLowerCase();
@@ -192,19 +253,10 @@ export async function fetchTrades(
       
       try {
         const block = await provider.getBlock(event.blockNumber);
+        const isBuy = isBaseGet;
         
-        // Determine trade direction and calculate amounts
-        const isBuy = isBaseGet; // Buyer gets base token
-        
-        const baseAmount = parseFloat(formatAmount(
-          isBuy ? amountGet : amountGive,
-          baseToken.decimals
-        ));
-        const quoteAmount = parseFloat(formatAmount(
-          isBuy ? amountGive : amountGet,
-          quoteToken.decimals
-        ));
-        
+        const baseAmount = parseFloat(formatAmount(isBuy ? amountGet : amountGive, baseToken.decimals));
+        const quoteAmount = parseFloat(formatAmount(isBuy ? amountGive : amountGet, quoteToken.decimals));
         const price = baseAmount > 0 ? quoteAmount / baseAmount : 0;
         
         trades.push({
@@ -227,9 +279,7 @@ export async function fetchTrades(
       }
     }
     
-    console.log(`Processed ${trades.length} trades for this pair`);
-    
-    // Update cache
+    console.log(`Got ${trades.length} trades from blockchain`);
     tradeCache.set(cacheKey, { trades, timestamp: Date.now() });
     
     return trades;

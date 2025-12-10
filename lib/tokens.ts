@@ -32,7 +32,7 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
     symbol: 'AfroX',
     name: 'AfroDex',
     address: '0x08130635368AA28b217a4dfb68E1bF8dC525621C',
-    decimals: 4,
+    decimals: 4, // Confirmed from Etherscan
     logo: '/tokens/afrox.png',
     description: 'AfroDex serves as a blockchain tech community focused on developing and deploying free or affordable technologies for easier Ethereum and ERC-20 tokens mass adoption.',
     website: 'https://afrox.one',
@@ -157,12 +157,10 @@ export const SUPPORTED_TOKENS: Record<string, Token> = {
  * Get token by symbol (case-insensitive)
  */
 export function getToken(symbol: string): Token | null {
-  // First try exact match
   if (SUPPORTED_TOKENS[symbol]) {
     return SUPPORTED_TOKENS[symbol];
   }
   
-  // Try case-insensitive match
   const upperSymbol = symbol.toUpperCase();
   for (const [key, token] of Object.entries(SUPPORTED_TOKENS)) {
     if (key.toUpperCase() === upperSymbol || token.symbol.toUpperCase() === upperSymbol) {
@@ -194,12 +192,8 @@ export function getTokenByAddress(address: string): Token | null {
  * Check if token is officially supported
  */
 export function isTokenSupported(symbolOrAddress: string): boolean {
-  // Check by symbol
   if (getToken(symbolOrAddress)) return true;
-  
-  // Check by address
   if (getTokenByAddress(symbolOrAddress)) return true;
-  
   return false;
 }
 
@@ -218,7 +212,7 @@ export function createCustomToken(
     address,
     decimals,
     logo: '/tokens/empty-token.png',
-    description: '⚠️ Important Notice: This token is not officially listed on AfroDex. Always verify the contract address before proceeding, as lost funds due to incorrect contract interactions are irreversible.',
+    description: '⚠️ Important Notice: This token is not officially listed on AfroDex. Always verify the contract address before proceeding.',
     isCustom: true,
     etherscan: `https://etherscan.io/token/${address}`,
   };
