@@ -537,36 +537,6 @@ export async function getAmountFilled(
   }
 }
 
-/**
- * Test if a trade would succeed
- */
-export async function testTrade(
-  provider: Provider,
-  order: SignedOrder,
-  amount: string,
-  senderAddress: string
-): Promise<boolean> {
-  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
-  try {
-    return await contract.testTrade(
-      order.tokenGet,
-      order.amountGet,
-      order.tokenGive,
-      order.amountGive,
-      order.expires,
-      order.nonce,
-      order.user,
-      order.v,
-      order.r,
-      order.s,
-      amount,
-      senderAddress
-    );
-  } catch (error) {
-    return false;
-  }
-}
-
 // ============================================
 // Utility Functions
 // ============================================

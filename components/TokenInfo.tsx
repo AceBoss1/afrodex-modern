@@ -77,10 +77,10 @@ export default function TokenInfo({ token }: TokenInfoProps) {
   return (
     <div className="card-neon">
       <div className="flex gap-4">
-        {/* LEFT SIDE: Token Info */}
-        <div className="flex gap-3 min-w-[320px]">
+        {/* LEFT SIDE: Token Info - narrower (about 35%) */}
+        <div className="flex gap-3 w-[280px] flex-shrink-0">
           {/* Token Logo */}
-          <div className="relative w-12 h-12 flex-shrink-0">
+          <div className="relative w-10 h-10 flex-shrink-0">
             <Image
               src={imageError ? '/tokens/empty-token.png' : token.logo}
               alt={token.symbol}
@@ -94,21 +94,21 @@ export default function TokenInfo({ token }: TokenInfoProps) {
           {/* Token Details */}
           <div className="flex-1 min-w-0">
             {/* Row 1: Symbol/ETH + Name */}
-            <div className="flex items-center gap-2 mb-0.5">
-              <h2 className="text-lg font-display font-bold">{token.symbol}</h2>
-              <span className="text-gray-500">/</span>
-              <span className="text-gray-400 text-sm">ETH</span>
-              <span className="text-gray-500 text-sm ml-1">{token.name}</span>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <h2 className="text-base font-display font-bold">{token.symbol}</h2>
+              <span className="text-gray-500 text-sm">/</span>
+              <span className="text-gray-400 text-xs">ETH</span>
+              <span className="text-gray-500 text-xs truncate">{token.name}</span>
             </div>
             
             {/* Row 2: Description */}
-            <p className="text-xs text-gray-500 mb-1 line-clamp-2">
+            <p className="text-[10px] text-gray-500 mb-1 line-clamp-2 leading-tight">
               {token.description}
             </p>
 
             {/* Row 3: Contract Address */}
             <div className="flex items-center gap-1">
-              <code className="text-xs text-gray-500 font-mono">
+              <code className="text-[10px] text-gray-500 font-mono">
                 {token.address.slice(0, 6)}...{token.address.slice(-4)}
               </code>
               <button
@@ -117,16 +117,16 @@ export default function TokenInfo({ token }: TokenInfoProps) {
                 title="Copy address"
               >
                 {copied ? (
-                  <Check className="w-3 h-3 text-green-400" />
+                  <Check className="w-2.5 h-2.5 text-green-400" />
                 ) : (
-                  <Copy className="w-3 h-3 text-gray-500" />
+                  <Copy className="w-2.5 h-2.5 text-gray-500" />
                 )}
               </button>
             </div>
           </div>
         </div>
 
-        {/* RIGHT SIDE: Analytics */}
+        {/* RIGHT SIDE: Analytics - wider (about 65%) */}
         <div className="flex-1 border-l border-white/5 pl-4">
           {/* Row 1: Price, Volume, Bid, Ask */}
           <div className="flex items-center gap-6 mb-1">
