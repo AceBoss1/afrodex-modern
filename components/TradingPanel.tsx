@@ -14,10 +14,12 @@ import {
   formatFullBalance,
   generateNonce,
   getExpirationBlock,
+  executeTrade,
+  SignedOrder,
 } from '@/lib/exchange';
-import { saveSignedOrder, isSupabaseConfigured } from '@/lib/supabase';
+import { saveSignedOrder, isSupabaseConfigured, cancelOrderByHash } from '@/lib/supabase';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { ArrowDownUp, AlertCircle, Loader2, CheckCircle } from 'lucide-react';
+import { ArrowDownUp, AlertCircle, Loader2, CheckCircle, Zap } from 'lucide-react';
 
 interface TradingPanelProps {
   baseToken: Token;
@@ -28,7 +30,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
-  const { balances, trades } = useTradingStore();
+  const { balances, trades, buyOrders, sellOrders } = useTradingStore();
   const { orderTab, setOrderTab, selectedPrice, setSelectedPrice } = useUIStore();
 
   const [price, setPrice] = useState('');
@@ -124,7 +126,33 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
     }
   };
 
-  // Handle placing order
+  // Find matching orders at a given price
+  const findMatchingOrders = (targetPrice: number, isBuyOrder: boolean) => {
+    // If placing a buy order, look for sell orders at or below the price
+    // If placing a sell order, look for buy orders at or above the price
+    const counterOrders = isBuyOrder ? sellOrders : buyOrders;
+    
+    return counterOrders.filter(order => {
+      if (!order.v || !order.r || !order.s) return false; // Must have signature
+      if (order.user?.toLowerCase() === address?.toLowerCase()) return false; // Skip own orders
+      
+      const orderPrice = order.price || 0;
+      if (isBuyOrder) {
+        return orderPrice <= targetPrice; // For buy, take sell orders at or below our price
+      } else {
+        return orderPrice >= targetPrice; // For sell, take buy orders at or above our price
+      }
+    }).sort((a, b) => {
+      // Sort by best price first
+      if (isBuyOrder) {
+        return (a.price || 0) - (b.price || 0); // Lowest price first for buys
+      } else {
+        return (b.price || 0) - (a.price || 0); // Highest price first for sells
+      }
+    });
+  };
+
+  // Handle placing order with smart matching
   const handlePlaceOrder = async () => {
     if (!walletClient || !price || !amount) return;
 
@@ -156,87 +184,125 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
     setSuccess(null);
 
     try {
-      // Create provider and signer
       const provider = new ethers.BrowserProvider(walletClient as any);
       const signer = await provider.getSigner();
 
-      // Calculate amounts in wei
-      const amountBase = parseAmount(amount, baseToken.decimals);
-      const amountQuote = parseAmount(totalStr, quoteToken.decimals);
-      
-      console.log('Order details:', {
-        price,
-        amount,
-        totalStr,
-        amountBase,
-        amountQuote,
-        baseDecimals: baseToken.decimals,
-        quoteDecimals: quoteToken.decimals
-      });
+      // Find matching counter-orders
+      const matchingOrders = findMatchingOrders(priceNum, orderTab === 'buy');
+      let remainingAmount = amountNum;
+      let executedTrades = 0;
 
-      // Determine order parameters based on side
-      // Buy order: want base token, give quote token (ETH)
-      // Sell order: want quote token (ETH), give base token
-      const tokenGet = orderTab === 'buy' ? baseToken.address : quoteToken.address;
-      const amountGet = orderTab === 'buy' ? amountBase : amountQuote;
-      const tokenGive = orderTab === 'buy' ? quoteToken.address : baseToken.address;
-      const amountGive = orderTab === 'buy' ? amountQuote : amountBase;
+      // Execute against matching orders first
+      for (const order of matchingOrders) {
+        if (remainingAmount <= 0) break;
 
-      // Get expiration (10000 blocks ≈ 1.5 days)
-      const expires = await getExpirationBlock(provider, 10000);
-      const nonce = generateNonce();
+        const orderAmountAvailable = parseFloat(
+          formatAmount(
+            order.availableVolume || (orderTab === 'buy' ? order.amountGive : order.amountGet),
+            orderTab === 'buy' ? baseToken.decimals : baseToken.decimals
+          )
+        );
 
-      // Sign the order OFF-CHAIN (gasless!)
-      console.log('Signing order off-chain...');
-      const signedOrder = await createSignedOrder(
-        signer,
-        tokenGet,
-        amountGet,
-        tokenGive,
-        amountGive,
-        expires,
-        nonce
-      );
+        const amountToTake = Math.min(remainingAmount, orderAmountAvailable);
+        if (amountToTake <= 0) continue;
 
-      console.log('Order signed:', signedOrder.hash);
+        try {
+          const signedOrder: SignedOrder = {
+            tokenGet: order.tokenGet,
+            amountGet: order.amountGet,
+            tokenGive: order.tokenGive,
+            amountGive: order.amountGive,
+            expires: order.expires,
+            nonce: order.nonce,
+            user: order.user,
+            v: order.v!,
+            r: order.r!,
+            s: order.s!,
+            hash: order.hash || '',
+          };
 
-      // Save to Supabase (off-chain orderbook)
-      const result = await saveSignedOrder({
-        token_get: tokenGet,
-        amount_get: amountGet,
-        token_give: tokenGive,
-        amount_give: amountGive,
-        expires,
-        nonce,
-        user_address: signedOrder.user,
-        base_token: baseToken.address,
-        quote_token: quoteToken.address,
-        side: orderTab,
-        price: priceNum,
-        base_amount: amountNum,
-        quote_amount: totalNum,
-        order_hash: signedOrder.hash!,
-        v: signedOrder.v!,
-        r: signedOrder.r!,
-        s: signedOrder.s!,
-      });
+          // Calculate the wei amount to trade
+          const amountInWei = parseAmount(amountToTake.toString(), baseToken.decimals);
+          
+          console.log(`Executing trade: ${amountToTake} @ ${order.price}`);
+          const tx = await executeTrade(signer, signedOrder, amountInWei);
+          await tx.wait();
+          
+          remainingAmount -= amountToTake;
+          executedTrades++;
+          console.log(`Trade executed. Remaining: ${remainingAmount}`);
+        } catch (err) {
+          console.error('Error executing trade against order:', err);
+          // Continue to next order
+        }
+      }
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to save order');
+      // If there's remaining amount, place a new order
+      if (remainingAmount > 0.0001) { // Dust threshold
+        const remainingTotal = remainingAmount * priceNum;
+        
+        // Calculate amounts in wei for remaining order
+        const amountBase = parseAmount(remainingAmount.toString(), baseToken.decimals);
+        const amountQuote = parseAmount(remainingTotal.toString(), quoteToken.decimals);
+        
+        const tokenGet = orderTab === 'buy' ? baseToken.address : quoteToken.address;
+        const amountGet = orderTab === 'buy' ? amountBase : amountQuote;
+        const tokenGive = orderTab === 'buy' ? quoteToken.address : baseToken.address;
+        const amountGive = orderTab === 'buy' ? amountQuote : amountBase;
+
+        const expires = await getExpirationBlock(provider, 10000);
+        const nonce = generateNonce();
+
+        console.log('Signing remaining order off-chain...');
+        const signedOrder = await createSignedOrder(
+          signer,
+          tokenGet,
+          amountGet,
+          tokenGive,
+          amountGive,
+          expires,
+          nonce
+        );
+
+        // Save to Supabase
+        await saveSignedOrder({
+          token_get: tokenGet,
+          amount_get: amountGet,
+          token_give: tokenGive,
+          amount_give: amountGive,
+          expires,
+          nonce,
+          user_address: signedOrder.user,
+          base_token: baseToken.address,
+          quote_token: quoteToken.address,
+          side: orderTab,
+          price: priceNum,
+          base_amount: remainingAmount,
+          quote_amount: remainingTotal,
+          order_hash: signedOrder.hash!,
+          v: signedOrder.v!,
+          r: signedOrder.r!,
+          s: signedOrder.s!,
+        });
+
+        if (executedTrades > 0) {
+          setSuccess(`Executed ${executedTrades} trade(s), placed order for ${remainingAmount.toFixed(4)} ${baseToken.symbol}`);
+        } else {
+          setSuccess(`${orderTab === 'buy' ? 'Buy' : 'Sell'} order placed! (Gasless)`);
+        }
+      } else {
+        setSuccess(`Executed ${executedTrades} trade(s) - order fully filled!`);
       }
 
       // Clear form
       setPrice('');
       setAmount('');
-      
-      // Show success message
-      setSuccess(`${orderTab === 'buy' ? 'Buy' : 'Sell'} order placed! (Gasless)`);
       setTimeout(() => setSuccess(null), 5000);
       
     } catch (err: any) {
       console.error('Error placing order:', err);
       if (err.code === 'ACTION_REJECTED' || err.message?.includes('rejected')) {
-        setError('Signature rejected. Please sign to place order.');
+        setError('Transaction rejected. Please try again.');
       } else {
         setError(err.message || 'Failed to place order. Please try again.');
       }
@@ -246,6 +312,9 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   };
 
   const isBuy = orderTab === 'buy';
+
+  // Check if there are matching orders
+  const matchingOrdersCount = price ? findMatchingOrders(parseFloat(price) || 0, isBuy).length : 0;
 
   return (
     <div className="card flex flex-col">
@@ -334,6 +403,14 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         ))}
       </div>
 
+      {/* Matching Orders Indicator */}
+      {matchingOrdersCount > 0 && (
+        <div className="flex items-center gap-2 p-2 bg-afrodex-orange/10 border border-afrodex-orange/20 rounded-lg mb-3 text-xs text-afrodex-orange">
+          <Zap className="w-3 h-3" />
+          <span>{matchingOrdersCount} matching order(s) will be executed first</span>
+        </div>
+      )}
+
       {/* Error Message */}
       {error && (
         <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
@@ -368,7 +445,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           {loading ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Placing...
+              {matchingOrdersCount > 0 ? 'Executing...' : 'Placing...'}
             </span>
           ) : (
             `${isBuy ? 'Buy' : 'Sell'} ${baseToken.symbol}`

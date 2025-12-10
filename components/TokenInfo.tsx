@@ -90,7 +90,7 @@ export default function TokenInfo({ token }: TokenInfoProps) {
         </div>
 
         {/* Middle: Token Info */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 max-w-[280px]">
           {/* Row 1: Symbol / ETH + Name */}
           <div className="flex items-center gap-2 mb-0.5">
             <h2 className="text-lg font-display font-bold">{token.symbol}</h2>
@@ -104,66 +104,27 @@ export default function TokenInfo({ token }: TokenInfoProps) {
             {token.description}
           </p>
 
-          {/* Row 3: Contract Address & Links */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <code className="text-xs text-gray-500 font-mono">
-                {token.address.slice(0, 6)}...{token.address.slice(-4)}
-              </code>
-              <button
-                onClick={handleCopyAddress}
-                className="p-0.5 hover:bg-white/5 rounded transition-colors"
-                title="Copy address"
-              >
-                {copied ? (
-                  <Check className="w-3 h-3 text-green-400" />
-                ) : (
-                  <Copy className="w-3 h-3 text-gray-500" />
-                )}
-              </button>
-            </div>
-            
-            {/* Links on right side */}
-            <div className="flex items-center gap-3">
-              {token.website && (
-                <a
-                  href={token.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors"
-                >
-                  <Globe className="w-3 h-3" />
-                  Website
-                </a>
+          {/* Row 3: Contract Address only */}
+          <div className="flex items-center gap-1">
+            <code className="text-xs text-gray-500 font-mono">
+              {token.address.slice(0, 6)}...{token.address.slice(-4)}
+            </code>
+            <button
+              onClick={handleCopyAddress}
+              className="p-0.5 hover:bg-white/5 rounded transition-colors"
+              title="Copy address"
+            >
+              {copied ? (
+                <Check className="w-3 h-3 text-green-400" />
+              ) : (
+                <Copy className="w-3 h-3 text-gray-500" />
               )}
-              {token.etherscan && (
-                <a
-                  href={token.etherscan}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors"
-                >
-                  <FileText className="w-3 h-3" />
-                  Etherscan
-                </a>
-              )}
-              {token.tracker && (
-                <a
-                  href={token.tracker}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors"
-                >
-                  <BarChart3 className="w-3 h-3" />
-                  Tracker
-                </a>
-              )}
-            </div>
+            </button>
           </div>
         </div>
 
         {/* Right: Stats Grid */}
-        <div className="flex-shrink-0 border-l border-white/5 pl-3">
+        <div className="flex-1 border-l border-white/5 pl-3">
           {/* Row 1: Price & Volume */}
           <div className="grid grid-cols-2 gap-x-4 mb-1.5">
             <div>
@@ -209,23 +170,41 @@ export default function TokenInfo({ token }: TokenInfoProps) {
             </div>
           </div>
 
-          {/* Row 3: Depth */}
-          <div className="grid grid-cols-2 gap-x-4 pt-1.5 border-t border-white/5">
-            <div>
-              <p className="text-[10px] text-gray-500 uppercase flex items-center gap-1">
-                <Layers className="w-2.5 h-2.5" /> Bid Depth
-              </p>
-              <p className="text-xs font-mono text-trade-buy">
-                {formatDisplayAmount(depth.totalBidETH)} <span className="text-gray-500">ETH</span>
-              </p>
+          {/* Row 3: Links + Depth on same row */}
+          <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
+            {/* Links */}
+            <div className="flex items-center gap-3">
+              {token.website && (
+                <a href={token.website} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
+                  <Globe className="w-3 h-3" />Website
+                </a>
+              )}
+              {token.etherscan && (
+                <a href={token.etherscan} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
+                  <FileText className="w-3 h-3" />Etherscan
+                </a>
+              )}
+              {token.tracker && (
+                <a href={token.tracker} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
+                  <BarChart3 className="w-3 h-3" />Tracker
+                </a>
+              )}
             </div>
-            <div>
-              <p className="text-[10px] text-gray-500 uppercase flex items-center gap-1">
-                <Layers className="w-2.5 h-2.5" /> Ask Depth
-              </p>
-              <p className="text-xs font-mono text-trade-sell">
-                {formatDisplayAmount(depth.totalAskETH)} <span className="text-gray-500">ETH</span>
-              </p>
+            {/* Depth */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1">
+                <Layers className="w-2.5 h-2.5 text-gray-500" />
+                <span className="text-[10px] text-gray-500">Bid:</span>
+                <span className="text-xs font-mono text-trade-buy">{formatDisplayAmount(depth.totalBidETH)}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Layers className="w-2.5 h-2.5 text-gray-500" />
+                <span className="text-[10px] text-gray-500">Ask:</span>
+                <span className="text-xs font-mono text-trade-sell">{formatDisplayAmount(depth.totalAskETH)}</span>
+              </div>
             </div>
           </div>
         </div>

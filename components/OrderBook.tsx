@@ -1,11 +1,13 @@
 // components/OrderBook.tsx
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useAccount, useWalletClient } from 'wagmi';
+import { ethers } from 'ethers';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { formatAmount, formatOrderBookPrice, formatOrderBookAmount } from '@/lib/exchange';
+import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder } from '@/lib/exchange';
 import { Token } from '@/lib/tokens';
-import { ArrowDown, ArrowUp, BookOpen } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookOpen, Loader2 } from 'lucide-react';
 
 interface OrderBookProps {
   baseToken: Token;
@@ -15,6 +17,11 @@ interface OrderBookProps {
 export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const { buyOrders, sellOrders, isLoadingOrders, trades } = useTradingStore();
   const { setSelectedPrice, setOrderTab } = useUIStore();
+  const { address, isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  
+  const [executingOrder, setExecutingOrder] = useState<string | null>(null);
+  const [executeError, setExecuteError] = useState<string | null>(null);
 
   // Process orders for display
   const processedOrders = useMemo(() => {
@@ -61,10 +68,75 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   // Get last trade for mid display
   const lastTrade = trades.length > 0 ? trades[0] : null;
 
-  // Handle clicking on an order
-  const handleOrderClick = (price: number, isBuy: boolean) => {
-    setSelectedPrice(price.toString());
-    setOrderTab(isBuy ? 'sell' : 'buy'); // If clicking buy order, user wants to sell, and vice versa
+  // Handle clicking on an order - EXECUTE the trade
+  const handleOrderClick = async (orderData: typeof processedOrders.buys[0], isSellOrder: boolean) => {
+    const order = orderData.order;
+    
+    // If order doesn't have signature, just set price (legacy behavior)
+    if (!order.v || !order.r || !order.s) {
+      setSelectedPrice(orderData.price.toString());
+      setOrderTab(isSellOrder ? 'buy' : 'sell');
+      return;
+    }
+
+    // If not connected or no wallet, just set price
+    if (!isConnected || !walletClient) {
+      setSelectedPrice(orderData.price.toString());
+      setOrderTab(isSellOrder ? 'buy' : 'sell');
+      return;
+    }
+
+    // Don't take your own order
+    if (order.user?.toLowerCase() === address?.toLowerCase()) {
+      setExecuteError("Can't take your own order");
+      setTimeout(() => setExecuteError(null), 3000);
+      return;
+    }
+
+    const orderKey = `${order.nonce}-${order.expires}`;
+    setExecutingOrder(orderKey);
+    setExecuteError(null);
+
+    try {
+      const provider = new ethers.BrowserProvider(walletClient as any);
+      const signer = await provider.getSigner();
+
+      const signedOrder: SignedOrder = {
+        tokenGet: order.tokenGet,
+        amountGet: order.amountGet,
+        tokenGive: order.tokenGive,
+        amountGive: order.amountGive,
+        expires: order.expires,
+        nonce: order.nonce,
+        user: order.user,
+        v: order.v,
+        r: order.r,
+        s: order.s,
+        hash: order.hash || '',
+      };
+
+      // Execute full amount available
+      const amountToTrade = order.availableVolume || order.amountGet;
+      
+      console.log('Executing trade:', { signedOrder, amountToTrade });
+      
+      const tx = await executeTrade(signer, signedOrder, amountToTrade);
+      console.log('Trade tx:', tx.hash);
+      
+      await tx.wait();
+      console.log('Trade confirmed!');
+      
+    } catch (err: any) {
+      console.error('Trade execution error:', err);
+      if (err.code === 'ACTION_REJECTED') {
+        setExecuteError('Transaction rejected');
+      } else {
+        setExecuteError(err.reason || err.message || 'Trade failed');
+      }
+      setTimeout(() => setExecuteError(null), 5000);
+    } finally {
+      setExecutingOrder(null);
+    }
   };
 
   if (isLoadingOrders) {
@@ -91,6 +163,13 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         </span>
       </div>
 
+      {/* Error message */}
+      {executeError && (
+        <div className="text-xs text-red-400 bg-red-500/10 p-2 rounded mb-2">
+          {executeError}
+        </div>
+      )}
+
       {/* Column Headers */}
       <div className="grid grid-cols-3 text-xs text-gray-500 pb-2 border-b border-white/5">
         <span>Price ({quoteToken.symbol})</span>
@@ -106,24 +185,31 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
               No sell orders
             </div>
           ) : (
-            processedOrders.sells.map((order, idx) => (
-              <div
-                key={`sell-${idx}`}
-                onClick={() => handleOrderClick(order.price, false)}
-                className="orderbook-row orderbook-row-sell cursor-pointer"
-                style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
-              >
-                <span className="text-trade-sell font-mono text-[11px]" title={order.price.toString()}>
-                  {formatOrderBookPrice(order.price)}
-                </span>
-                <span className="text-right font-mono text-gray-300 text-[11px]" title={order.amount.toString()}>
-                  {formatOrderBookAmount(order.amount)}
-                </span>
-                <span className="text-right font-mono text-gray-500 text-[11px]" title={order.total.toString()}>
-                  {formatOrderBookAmount(order.total)}
-                </span>
-              </div>
-            ))
+            processedOrders.sells.map((orderData, idx) => {
+              const orderKey = `${orderData.order.nonce}-${orderData.order.expires}`;
+              const isExecuting = executingOrder === orderKey;
+              
+              return (
+                <div
+                  key={`sell-${idx}`}
+                  onClick={() => !isExecuting && handleOrderClick(orderData, true)}
+                  className={`orderbook-row orderbook-row-sell cursor-pointer ${isExecuting ? 'opacity-50' : ''}`}
+                  style={{ '--depth': `${orderData.depth}%` } as React.CSSProperties}
+                  title="Click to buy at this price"
+                >
+                  <span className="text-trade-sell font-mono text-[11px] flex items-center gap-1">
+                    {isExecuting && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {formatOrderBookPrice(orderData.price)}
+                  </span>
+                  <span className="text-right font-mono text-gray-300 text-[11px]">
+                    {formatOrderBookAmount(orderData.amount)}
+                  </span>
+                  <span className="text-right font-mono text-gray-500 text-[11px]">
+                    {formatOrderBookAmount(orderData.total)}
+                  </span>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
@@ -160,24 +246,31 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
             No buy orders
           </div>
         ) : (
-          processedOrders.buys.map((order, idx) => (
-            <div
-              key={`buy-${idx}`}
-              onClick={() => handleOrderClick(order.price, true)}
-              className="orderbook-row orderbook-row-buy cursor-pointer"
-              style={{ '--depth': `${order.depth}%` } as React.CSSProperties}
-            >
-              <span className="text-trade-buy font-mono text-[11px]" title={order.price.toString()}>
-                {formatOrderBookPrice(order.price)}
-              </span>
-              <span className="text-right font-mono text-gray-300 text-[11px]" title={order.amount.toString()}>
-                {formatOrderBookAmount(order.amount)}
-              </span>
-              <span className="text-right font-mono text-gray-500 text-[11px]" title={order.total.toString()}>
-                {formatOrderBookAmount(order.total)}
-              </span>
-            </div>
-          ))
+          processedOrders.buys.map((orderData, idx) => {
+            const orderKey = `${orderData.order.nonce}-${orderData.order.expires}`;
+            const isExecuting = executingOrder === orderKey;
+            
+            return (
+              <div
+                key={`buy-${idx}`}
+                onClick={() => !isExecuting && handleOrderClick(orderData, false)}
+                className={`orderbook-row orderbook-row-buy cursor-pointer ${isExecuting ? 'opacity-50' : ''}`}
+                style={{ '--depth': `${orderData.depth}%` } as React.CSSProperties}
+                title="Click to sell at this price"
+              >
+                <span className="text-trade-buy font-mono text-[11px] flex items-center gap-1">
+                  {isExecuting && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {formatOrderBookPrice(orderData.price)}
+                </span>
+                <span className="text-right font-mono text-gray-300 text-[11px]">
+                  {formatOrderBookAmount(orderData.amount)}
+                </span>
+                <span className="text-right font-mono text-gray-500 text-[11px]">
+                  {formatOrderBookAmount(orderData.total)}
+                </span>
+              </div>
+            );
+          })
         )}
       </div>
 

@@ -99,7 +99,30 @@ export default function GuidePage() {
             </div>
           </section>
 
-          {/* Step 2: Add Custom Token */}
+          {/* Trading Pairs */}
+          <section className="card">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-afrodex-orange/20 flex items-center justify-center">
+                <ExternalLink className="w-5 h-5 text-afrodex-orange" />
+              </div>
+              <div>
+                <span className="text-xs text-afrodex-orange font-semibold">TRADING PAIRS</span>
+                <h2 className="text-xl font-semibold">Access Any Trading Pair via URL</h2>
+              </div>
+            </div>
+            <div className="space-y-3 text-gray-300">
+              <p>Navigate directly to any trading pair using the URL format:</p>
+              <div className="bg-afrodex-black-lighter rounded-lg p-3 text-sm font-mono space-y-2">
+                <div><span className="text-gray-500"># Official tokens:</span></div>
+                <div>https://dex.afrox.one/trade/<span className="text-afrodex-orange">AfroX</span>-ETH</div>
+                <div>https://dex.afrox.one/trade/<span className="text-afrodex-orange">PFARM</span>-ETH</div>
+                <div><span className="text-gray-500"># Custom token by address:</span></div>
+                <div>https://dex.afrox.one/trade/<span className="text-afrodex-orange">0x123...</span>-ETH</div>
+              </div>
+            </div>
+          </section>
+
+          {/* Step 2: Self-List Token */}
           <section className="card">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-afrodex-orange/20 flex items-center justify-center">
@@ -107,16 +130,17 @@ export default function GuidePage() {
               </div>
               <div>
                 <span className="text-xs text-afrodex-orange font-semibold">STEP 2</span>
-                <h2 className="text-xl font-semibold">Access Any ERC-20 Token</h2>
+                <h2 className="text-xl font-semibold">Self-List Any ERC-20 Token</h2>
               </div>
             </div>
             <div className="space-y-3 text-gray-300">
               <p>Trade any ERC-20 token — even if it&apos;s not officially listed. Just add the token contract address.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
                 <li>Click <strong>&ldquo;+ Add Custom Token&rdquo;</strong> in the sidebar</li>
-                <li>Paste the token&apos;s contract address</li>
-                <li>The token info will be automatically loaded</li>
+                <li>Paste the ERC-20 token&apos;s contract address</li>
+                <li>Click <strong>&ldquo;Add Token&rdquo;</strong></li>
                 <li>Click the <strong>⭐ star</strong> to add it to your favorites</li>
+                <li>Start trading! Your community can access via: <code className="bg-black/30 px-1 rounded text-xs">dex.afrox.one/trade/0x123...-ETH</code></li>
               </ol>
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-sm">
                 <strong className="text-yellow-400">⚠️ Warning:</strong> Always verify the contract address from official sources. 
@@ -321,6 +345,51 @@ export default function GuidePage() {
             <p className="text-xs text-gray-500 mt-3">
               * Gas fees for on-chain transactions (deposits, withdrawals, trades) are paid to Ethereum miners, not AfroDex.
             </p>
+          </section>
+
+          {/* Smart Contract */}
+          <section className="card">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-afrodex-orange/20 flex items-center justify-center">
+                <Shield className="w-5 h-5 text-afrodex-orange" />
+              </div>
+              <h2 className="text-xl font-semibold">Smart Contract</h2>
+            </div>
+            <div className="space-y-3 text-gray-300">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">Exchange Contract:</span>
+                <code className="bg-afrodex-black-lighter px-2 py-1 rounded text-xs font-mono text-afrodex-orange">
+                  0xe8fff15bb5e14095bfdfa8bb85d83cc900c23c56
+                </code>
+                <a 
+                  href="https://etherscan.io/address/0xe8fff15bb5e14095bfdfa8bb85d83cc900c23c56" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-afrodex-orange hover:underline text-xs"
+                >
+                  View on Etherscan ↗
+                </a>
+              </div>
+              <p className="text-sm">This is an EtherDelta/ForkDelta-style order book contract with:</p>
+              <ul className="space-y-1 text-sm">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-400" />
+                  Off-chain order placement (gasless signatures)
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-400" />
+                  On-chain order signing and verification
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-400" />
+                  Trustless trade execution
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-400" />
+                  Direct peer-to-peer settlement
+                </li>
+              </ul>
+            </div>
           </section>
 
         </div>
