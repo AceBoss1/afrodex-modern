@@ -23,6 +23,7 @@ import OrderBook from '@/components/OrderBook';
 import TradeHistory from '@/components/TradeHistory';
 import TradingPanel from '@/components/TradingPanel';
 import BalancePanel from '@/components/BalancePanel';
+import MyTransactions from '@/components/MyTransactions';
 
 export default function TradePage() {
   const params = useParams();
@@ -217,33 +218,38 @@ export default function TradePage() {
 
       {/* Main Content - 2 Column Layout */}
       <main className="flex-1 flex overflow-hidden">
-        {/* Left Column - Token Info + Chart + Recent Trades (Static/Fixed) */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Left Column - Token Info + Chart + Recent Trades + My Transactions */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0 max-w-[calc(100%-420px)]">
           {/* Token Info Header */}
-          <div className="p-3 pb-0">
+          <div className="p-2 pb-0">
             <TokenInfo token={baseToken} />
           </div>
 
           {/* Chart */}
-          <div className="flex-1 p-3 min-h-[300px]">
+          <div className="flex-1 p-2 min-h-[280px]">
             <TradingChart baseToken={baseToken} quoteToken={quoteToken} />
           </div>
           
           {/* Recent Trades */}
-          <div className="h-[250px] p-3 pt-0">
+          <div className="h-[200px] p-2 pt-0">
             <TradeHistory baseToken={baseToken} quoteToken={quoteToken} />
+          </div>
+
+          {/* My Transactions */}
+          <div className="h-[220px] p-2 pt-0">
+            <MyTransactions baseToken={baseToken} quoteToken={quoteToken} />
           </div>
         </div>
 
-        {/* Right Column - Place Order + Order Book + Balances (Scrollable) */}
-        <div className="w-80 lg:w-96 flex-shrink-0 flex flex-col gap-3 p-3 border-l border-white/5 overflow-y-auto">
+        {/* Right Column - Place Order + Order Book + Balances (Scrollable) - WIDER */}
+        <div className="w-[420px] flex-shrink-0 flex flex-col gap-2 p-2 border-l border-white/5 overflow-y-auto">
           {/* Place Order */}
           <div className="flex-shrink-0">
             <TradingPanel baseToken={baseToken} quoteToken={quoteToken} />
           </div>
           
           {/* Order Book */}
-          <div className="flex-shrink-0 min-h-[350px]">
+          <div className="flex-shrink-0 min-h-[380px]">
             <OrderBook baseToken={baseToken} quoteToken={quoteToken} />
           </div>
           
