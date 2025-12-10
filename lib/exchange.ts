@@ -261,7 +261,39 @@ export async function signOrder(
 }
 
 /**
- * Place an order on-chain (emits Order event)
+ * Create and sign an order off-chain (gasless)
+ * Returns signed order to be stored in Supabase
+ */
+export async function createSignedOrder(
+  signer: Signer,
+  tokenGet: string,
+  amountGet: string,
+  tokenGive: string,
+  amountGive: string,
+  expires: string,
+  nonce: string
+): Promise<SignedOrder> {
+  const userAddress = await signer.getAddress();
+  
+  const order: Order = {
+    tokenGet,
+    amountGet,
+    tokenGive,
+    amountGive,
+    expires,
+    nonce,
+    user: userAddress,
+  };
+  
+  // Sign the order (gasless - just a signature)
+  const signedOrder = await signOrder(signer, order);
+  
+  return signedOrder;
+}
+
+/**
+ * Place an order on-chain (emits Order event) - LEGACY
+ * Note: AfroDex uses off-chain orderbook, use createSignedOrder instead
  */
 export async function placeOrder(
   signer: Signer,

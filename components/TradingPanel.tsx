@@ -4,9 +4,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { ethers } from 'ethers';
-import { Token } from '@/lib/tokens';
+import { Token, ZERO_ADDRESS } from '@/lib/tokens';
 import { 
-  placeOrder, 
+  createSignedOrder, 
   parseAmount, 
   formatAmount,
   formatDisplayAmount,
@@ -14,10 +14,10 @@ import {
   formatFullBalance,
   generateNonce,
   getExpirationBlock,
-  ZERO_ADDRESS,
 } from '@/lib/exchange';
+import { saveSignedOrder, isSupabaseConfigured } from '@/lib/supabase';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { ArrowDownUp, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowDownUp, AlertCircle, Loader2, CheckCircle } from 'lucide-react';
 
 interface TradingPanelProps {
   baseToken: Token;
@@ -35,6 +35,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Auto-fill price from order book selection
   useEffect(() => {
@@ -135,6 +136,12 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
       return;
     }
 
+    // Check if Supabase is configured
+    if (!isSupabaseConfigured()) {
+      setError('Order book not configured. Please set up Supabase.');
+      return;
+    }
+
     // Check balance
     const available = getAvailableBalance();
     const required = orderTab === 'buy' ? totalNum : amountNum;
@@ -146,6 +153,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       // Create provider and signer
@@ -178,8 +186,9 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
       const expires = await getExpirationBlock(provider, 10000);
       const nonce = generateNonce();
 
-      // Place order on-chain
-      const tx = await placeOrder(
+      // Sign the order OFF-CHAIN (gasless!)
+      console.log('Signing order off-chain...');
+      const signedOrder = await createSignedOrder(
         signer,
         tokenGet,
         amountGet,
@@ -189,18 +198,48 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         nonce
       );
 
-      // Wait for confirmation
-      await tx.wait();
+      console.log('Order signed:', signedOrder.hash);
+
+      // Save to Supabase (off-chain orderbook)
+      const result = await saveSignedOrder({
+        token_get: tokenGet,
+        amount_get: amountGet,
+        token_give: tokenGive,
+        amount_give: amountGive,
+        expires,
+        nonce,
+        user_address: signedOrder.user,
+        base_token: baseToken.address,
+        quote_token: quoteToken.address,
+        side: orderTab,
+        price: priceNum,
+        base_amount: amountNum,
+        quote_amount: totalNum,
+        order_hash: signedOrder.hash!,
+        v: signedOrder.v!,
+        r: signedOrder.r!,
+        s: signedOrder.s!,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save order');
+      }
 
       // Clear form
       setPrice('');
       setAmount('');
       
-      // Show success (you could use a toast notification here)
-      alert(`${orderTab === 'buy' ? 'Buy' : 'Sell'} order placed successfully!`);
+      // Show success message
+      setSuccess(`${orderTab === 'buy' ? 'Buy' : 'Sell'} order placed! (Gasless)`);
+      setTimeout(() => setSuccess(null), 5000);
+      
     } catch (err: any) {
       console.error('Error placing order:', err);
-      setError(err.message || 'Failed to place order. Please try again.');
+      if (err.code === 'ACTION_REJECTED' || err.message?.includes('rejected')) {
+        setError('Signature rejected. Please sign to place order.');
+      } else {
+        setError(err.message || 'Failed to place order. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -300,6 +339,14 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
           <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {/* Success Message */}
+      {success && (
+        <div className="flex items-start gap-2 p-2 bg-green-500/10 border border-green-500/20 rounded-lg mb-3 text-xs text-green-400">
+          <CheckCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+          <span>{success}</span>
         </div>
       )}
 

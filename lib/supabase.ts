@@ -22,6 +22,31 @@ export interface DbOrder {
   is_active: boolean;
   amount_filled: string;
   is_cancelled: boolean;
+  // Signature fields for off-chain orders
+  order_hash?: string;
+  v?: number;
+  r?: string;
+  s?: string;
+}
+
+export interface SignedOrderInput {
+  token_get: string;
+  amount_get: string;
+  token_give: string;
+  amount_give: string;
+  expires: string;
+  nonce: string;
+  user_address: string;
+  base_token: string;
+  quote_token: string;
+  side: 'buy' | 'sell';
+  price: number;
+  base_amount: number;
+  quote_amount: number;
+  order_hash: string;
+  v: number;
+  r: string;
+  s: string;
 }
 
 export interface DbTrade {
@@ -104,6 +129,69 @@ export async function deactivateOrder(txHash: string, logIndex = 0): Promise<boo
     .update({ is_active: false })
     .eq('tx_hash', txHash)
     .eq('log_index', logIndex);
+
+  return !error;
+}
+
+/**
+ * Save a signed order (off-chain, gasless)
+ * Uses order_hash as unique identifier instead of tx_hash
+ */
+export async function saveSignedOrder(order: SignedOrderInput): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+
+  const dbOrder = {
+    tx_hash: order.order_hash, // Use order_hash as tx_hash for off-chain orders
+    log_index: 0,
+    token_get: order.token_get.toLowerCase(),
+    amount_get: order.amount_get,
+    token_give: order.token_give.toLowerCase(),
+    amount_give: order.amount_give,
+    expires: order.expires,
+    nonce: order.nonce,
+    user_address: order.user_address.toLowerCase(),
+    block_number: 0, // Off-chain order, no block
+    base_token: order.base_token.toLowerCase(),
+    quote_token: order.quote_token.toLowerCase(),
+    side: order.side,
+    price: order.price,
+    base_amount: order.base_amount,
+    quote_amount: order.quote_amount,
+    is_active: true,
+    amount_filled: '0',
+    is_cancelled: false,
+    order_hash: order.order_hash,
+    v: order.v,
+    r: order.r,
+    s: order.s,
+  };
+
+  const { error } = await supabase
+    .from('orders')
+    .upsert(dbOrder, { onConflict: 'tx_hash,log_index' });
+
+  if (error) {
+    console.error('Error saving signed order:', error);
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Cancel an order by hash (off-chain)
+ */
+export async function cancelOrderByHash(orderHash: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const { error } = await supabase
+    .from('orders')
+    .update({ is_cancelled: true, is_active: false })
+    .eq('order_hash', orderHash);
 
   return !error;
 }
