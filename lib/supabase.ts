@@ -225,42 +225,41 @@ export async function getTradesFromDb(baseToken: string, quoteToken: string, lim
   return data || [];
 }
 
-// Sync Status
-export async function getLastSyncedBlock(eventType: string): Promise<number> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return 9100009;
-
-  const { data } = await supabase
-    .from('sync_status')
-    .select('last_synced_block')
-    .eq('event_type', eventType)
-    .single();
-
-  return data?.last_synced_block || 9100009;
-}
-
-export async function updateSyncStatus(eventType: string, lastBlock: number, totalEvents?: number): Promise<boolean> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return false;
-
-  const { error } = await supabase
-    .from('sync_status')
-    .upsert({
-      event_type: eventType,
-      last_synced_block: lastBlock,
-      last_sync_time: new Date().toISOString(),
-      total_events: totalEvents,
-      status: 'synced'
-    }, { onConflict: 'event_type' });
-
-  return !error;
-}
-
-// Test connection
+// Test connection (use orders table instead of sync_status)
 export async function testConnection(): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  const { error } = await supabase.from('sync_status').select('event_type').limit(1);
+  const { error } = await supabase.from('orders').select('id').limit(1);
+  return !error;
+}
+
+/**
+ * Delete all orders for a user (useful when signatures are invalid)
+ */
+export async function deleteUserOrders(userAddress: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const { error } = await supabase
+    .from('orders')
+    .delete()
+    .eq('user_address', userAddress.toLowerCase());
+
+  return !error;
+}
+
+/**
+ * Delete all active orders (for clearing invalid signatures)
+ */
+export async function clearAllOrders(): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const { error } = await supabase
+    .from('orders')
+    .delete()
+    .eq('is_active', true);
+
   return !error;
 }

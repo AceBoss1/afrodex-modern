@@ -219,27 +219,29 @@ export async function withdrawToken(
 // ============================================
 
 /**
- * Generate order hash for signing
+ * Generate order hash for signing (EtherDelta uses sha256)
  */
 export function getOrderHash(order: Order): string {
-  return keccak256(
-    solidityPacked(
-      ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
-      [
-        EXCHANGE_ADDRESS,
-        order.tokenGet,
-        order.amountGet,
-        order.tokenGive,
-        order.amountGive,
-        order.expires,
-        order.nonce,
-      ]
-    )
+  // EtherDelta/ForkDelta uses sha256, not keccak256
+  const packed = solidityPacked(
+    ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
+    [
+      EXCHANGE_ADDRESS,
+      order.tokenGet,
+      order.amountGet,
+      order.tokenGive,
+      order.amountGive,
+      order.expires,
+      order.nonce,
+    ]
   );
+  
+  // Use sha256 for EtherDelta compatibility
+  return ethers.sha256(packed);
 }
 
 /**
- * Sign an order
+ * Sign an order (EtherDelta style)
  */
 export async function signOrder(
   signer: Signer,
@@ -251,10 +253,16 @@ export async function signOrder(
   const signature = await signer.signMessage(ethers.getBytes(hash));
   const sig = ethers.Signature.from(signature);
   
+  // EtherDelta expects v to be 27 or 28
+  let v = sig.v;
+  if (v < 27) {
+    v += 27;
+  }
+  
   return {
     ...order,
     hash,
-    v: sig.v,
+    v,
     r: sig.r,
     s: sig.s,
   };
@@ -414,22 +422,39 @@ export async function preTradeCheck(
       return { canTrade: false, reason: `Order expired (block ${order.expires} < current ${currentBlock})` };
     }
 
-    // 2. Check available volume
-    const availableVolume = await contract.availableVolume(
-      order.tokenGet,
-      order.amountGet,
-      order.tokenGive,
-      order.amountGive,
-      order.expires,
-      order.nonce,
-      order.user,
-      order.v,
-      order.r,
-      order.s
-    );
+    // 2. Check available volume (also validates signature)
+    let availableVolume;
+    try {
+      availableVolume = await contract.availableVolume(
+        order.tokenGet,
+        order.amountGet,
+        order.tokenGive,
+        order.amountGive,
+        order.expires,
+        order.nonce,
+        order.user,
+        order.v,
+        order.r,
+        order.s
+      );
+    } catch (err: any) {
+      console.error('availableVolume call failed:', err);
+      return { canTrade: false, reason: `Contract call failed: ${err.message}` };
+    }
     
     if (availableVolume.toString() === '0') {
-      return { canTrade: false, reason: 'Order fully filled or invalid signature' };
+      // Check if maker has deposited tokens
+      const makerBalance = await contract.balanceOf(order.tokenGive, order.user);
+      if (makerBalance.toString() === '0') {
+        return { canTrade: false, reason: `Maker has not deposited tokens (balance: 0)` };
+      }
+      
+      // Check if order was cancelled
+      // If volume is 0 but maker has balance, likely invalid signature
+      return { 
+        canTrade: false, 
+        reason: `Invalid signature or order filled. This order was likely signed with incorrect parameters. Delete and create new order.` 
+      };
     }
 
     const amountBigInt = BigInt(amount);
