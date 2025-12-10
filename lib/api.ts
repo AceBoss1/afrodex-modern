@@ -1,5 +1,5 @@
 // lib/api.ts
-import { ethers, Contract, Provider, Log } from 'ethers';
+import { ethers, Contract, Provider } from 'ethers';
 import { EXCHANGE_ADDRESS, Order, Trade, calculateOrderPrice, formatAmount } from './exchange';
 import { EXCHANGE_ABI } from './abi';
 import { Token, ZERO_ADDRESS } from './tokens';
@@ -9,10 +9,6 @@ import { isSupabaseConfigured, getOrdersFromDb, getTradesFromDb, DbOrder, DbTrad
 const orderCache = new Map<string, { orders: { buyOrders: Order[]; sellOrders: Order[] }; timestamp: number }>();
 const tradeCache = new Map<string, { trades: Trade[]; timestamp: number }>();
 const CACHE_DURATION = 30000; // 30 seconds
-
-// Block range to scan
-const ORDER_BLOCK_RANGE = 50000;
-const TRADE_BLOCK_RANGE = 100000;
 
 function getCacheKey(baseToken: Token, quoteToken: Token): string {
   return `${baseToken.address.toLowerCase()}-${quoteToken.address.toLowerCase()}`;
@@ -64,7 +60,7 @@ function dbTradeToTrade(dbTrade: DbTrade): Trade {
 }
 
 /**
- * Fetch orders - tries Supabase first, falls back to blockchain
+ * Fetch orders from Supabase (off-chain orderbook - no blockchain fallback)
  */
 export async function fetchOrders(
   provider: Provider,
@@ -81,115 +77,45 @@ export async function fetchOrders(
     }
   }
 
-  // Try Supabase first
+  // Off-chain orderbook - only use Supabase
   if (isSupabaseConfigured()) {
     try {
       console.log('Fetching orders from Supabase...');
       const dbOrders = await getOrdersFromDb(baseToken.address, ZERO_ADDRESS);
       
-      if (dbOrders.length > 0) {
-        const buyOrders: Order[] = [];
-        const sellOrders: Order[] = [];
-        
-        for (const dbOrder of dbOrders) {
-          const order = dbOrderToOrder(dbOrder, baseToken, quoteToken);
-          if (dbOrder.side === 'buy') {
-            buyOrders.push(order);
-          } else {
-            sellOrders.push(order);
-          }
+      const buyOrders: Order[] = [];
+      const sellOrders: Order[] = [];
+      
+      for (const dbOrder of dbOrders) {
+        const order = dbOrderToOrder(dbOrder, baseToken, quoteToken);
+        if (dbOrder.side === 'buy') {
+          buyOrders.push(order);
+        } else {
+          sellOrders.push(order);
         }
-        
-        const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
-        const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
-        
-        console.log(`Got ${sortedBuyOrders.length} buy, ${sortedSellOrders.length} sell orders from Supabase`);
-        
-        const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
-        orderCache.set(cacheKey, { orders: result, timestamp: Date.now() });
-        return result;
       }
+      
+      const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
+      const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
+      
+      console.log(`Got ${sortedBuyOrders.length} buy, ${sortedSellOrders.length} sell orders from Supabase`);
+      
+      const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
+      orderCache.set(cacheKey, { orders: result, timestamp: Date.now() });
+      return result;
     } catch (err) {
-      console.error('Supabase order fetch failed, falling back to blockchain:', err);
+      console.error('Error fetching orders from Supabase:', err);
     }
+  } else {
+    console.log('Supabase not configured - no orders available');
   }
 
-  // Fallback to blockchain
-  try {
-    const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
-    const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - ORDER_BLOCK_RANGE);
-    
-    console.log(`Fetching orders from blockchain blocks ${fromBlock} to ${currentBlock}`);
-    
-    const orderFilter = contract.filters.Order();
-    const orderEvents = await contract.queryFilter(orderFilter, fromBlock, 'latest');
-    
-    const buyOrders: Order[] = [];
-    const sellOrders: Order[] = [];
-    
-    for (const event of orderEvents) {
-      const log = event as Log & { args?: any };
-      if (!log.args) continue;
-      
-      const tokenGet = log.args[0] as string;
-      const amountGet = log.args[1].toString();
-      const tokenGive = log.args[2] as string;
-      const amountGive = log.args[3].toString();
-      const expires = log.args[4].toString();
-      const nonce = log.args[5].toString();
-      const user = log.args[6] as string;
-      
-      const isBuyOrder = 
-        tokenGet.toLowerCase() === baseToken.address.toLowerCase() &&
-        tokenGive.toLowerCase() === quoteToken.address.toLowerCase();
-        
-      const isSellOrder = 
-        tokenGet.toLowerCase() === quoteToken.address.toLowerCase() &&
-        tokenGive.toLowerCase() === baseToken.address.toLowerCase();
-      
-      if (!isBuyOrder && !isSellOrder) continue;
-      if (parseInt(expires) <= currentBlock) continue;
-      if (amountGet === '0' || amountGive === '0') continue;
-      
-      const order: Order = {
-        tokenGet,
-        amountGet,
-        tokenGive,
-        amountGive,
-        expires,
-        nonce,
-        user,
-        availableVolume: amountGet,
-        side: isBuyOrder ? 'buy' : 'sell',
-      };
-      
-      order.price = calculateOrderPrice(order, baseToken.decimals, quoteToken.decimals, baseToken.address);
-      
-      if (isBuyOrder) {
-        buyOrders.push(order);
-      } else {
-        sellOrders.push(order);
-      }
-    }
-    
-    const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
-    const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
-    
-    console.log(`Got ${sortedBuyOrders.length} buy, ${sortedSellOrders.length} sell orders from blockchain`);
-    
-    const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
-    orderCache.set(cacheKey, { orders: result, timestamp: Date.now() });
-    
-    return result;
-  } catch (error) {
-    console.error('Error fetching orders:', error);
-    return { buyOrders: [], sellOrders: [] };
-  }
+  // Return empty if Supabase fails (off-chain orderbook doesn't use blockchain)
+  return { buyOrders: [], sellOrders: [] };
 }
 
 /**
- * Fetch trades - tries Supabase first, falls back to blockchain
+ * Fetch trades from Supabase (no blockchain fallback - saves RPC calls)
  */
 export async function fetchTrades(
   provider: Provider,
@@ -207,92 +133,25 @@ export async function fetchTrades(
     }
   }
 
-  // Try Supabase first
+  // Use Supabase for trade history (no blockchain fallback to avoid RPC limits)
   if (isSupabaseConfigured()) {
     try {
       console.log('Fetching trades from Supabase...');
       const dbTrades = await getTradesFromDb(baseToken.address, ZERO_ADDRESS, limit);
       
-      if (dbTrades.length > 0) {
-        const trades = dbTrades.map(dbTradeToTrade);
-        console.log(`Got ${trades.length} trades from Supabase`);
-        tradeCache.set(cacheKey, { trades, timestamp: Date.now() });
-        return trades;
-      }
+      const trades = dbTrades.map(dbTradeToTrade);
+      console.log(`Got ${trades.length} trades from Supabase`);
+      tradeCache.set(cacheKey, { trades, timestamp: Date.now() });
+      return trades;
     } catch (err) {
-      console.error('Supabase trade fetch failed, falling back to blockchain:', err);
+      console.error('Error fetching trades from Supabase:', err);
     }
+  } else {
+    console.log('Supabase not configured - no trade history available');
   }
 
-  // Fallback to blockchain
-  try {
-    const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
-    const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - TRADE_BLOCK_RANGE);
-    
-    console.log(`Fetching trades from blockchain blocks ${fromBlock} to ${currentBlock}`);
-    
-    const tradeFilter = contract.filters.Trade();
-    const tradeEvents = await contract.queryFilter(tradeFilter, fromBlock, 'latest');
-    
-    const trades: Trade[] = [];
-    
-    for (const event of [...tradeEvents].reverse()) {
-      if (trades.length >= limit) break;
-      
-      const log = event as Log & { args?: any };
-      if (!log.args) continue;
-      
-      const tokenGet = log.args[0] as string;
-      const amountGet = log.args[1].toString();
-      const tokenGive = log.args[2] as string;
-      const amountGive = log.args[3].toString();
-      const maker = log.args[4] as string;
-      const taker = log.args[5] as string;
-      
-      const isBaseGet = tokenGet.toLowerCase() === baseToken.address.toLowerCase();
-      const isQuoteGet = tokenGet.toLowerCase() === quoteToken.address.toLowerCase();
-      const isBaseGive = tokenGive.toLowerCase() === baseToken.address.toLowerCase();
-      const isQuoteGive = tokenGive.toLowerCase() === quoteToken.address.toLowerCase();
-      
-      if (!((isBaseGet && isQuoteGive) || (isQuoteGet && isBaseGive))) continue;
-      
-      try {
-        const block = await provider.getBlock(event.blockNumber);
-        const isBuy = isBaseGet;
-        
-        const baseAmount = parseFloat(formatAmount(isBuy ? amountGet : amountGive, baseToken.decimals));
-        const quoteAmount = parseFloat(formatAmount(isBuy ? amountGive : amountGet, quoteToken.decimals));
-        const price = baseAmount > 0 ? quoteAmount / baseAmount : 0;
-        
-        trades.push({
-          txHash: event.transactionHash,
-          blockNumber: event.blockNumber,
-          timestamp: block?.timestamp ? Number(block.timestamp) : Math.floor(Date.now() / 1000),
-          tokenGet,
-          amountGet,
-          tokenGive,
-          amountGive,
-          maker,
-          taker,
-          price,
-          side: isBuy ? 'buy' : 'sell',
-          baseAmount,
-          quoteAmount,
-        });
-      } catch (blockError) {
-        console.warn('Error fetching block:', blockError);
-      }
-    }
-    
-    console.log(`Got ${trades.length} trades from blockchain`);
-    tradeCache.set(cacheKey, { trades, timestamp: Date.now() });
-    
-    return trades;
-  } catch (error) {
-    console.error('Error fetching trades:', error);
-    return [];
-  }
+  // Return empty if Supabase fails (avoids RPC rate limits)
+  return [];
 }
 
 /**
