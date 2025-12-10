@@ -72,17 +72,32 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const handleOrderClick = async (orderData: typeof processedOrders.buys[0], isSellOrder: boolean) => {
     const order = orderData.order;
     
+    console.log('Order clicked:', {
+      price: orderData.price,
+      amount: orderData.amount,
+      side: isSellOrder ? 'sell' : 'buy',
+      hasSignature: !!(order.v && order.r && order.s),
+      v: order.v,
+      user: order.user,
+    });
+    
     // If order doesn't have signature, just set price (legacy behavior)
     if (!order.v || !order.r || !order.s) {
+      console.log('No signature found - just setting price');
       setSelectedPrice(orderData.price.toString());
       setOrderTab(isSellOrder ? 'buy' : 'sell');
+      setExecuteError('This order has no signature - cannot execute directly');
+      setTimeout(() => setExecuteError(null), 3000);
       return;
     }
 
     // If not connected or no wallet, just set price
     if (!isConnected || !walletClient) {
+      console.log('Wallet not connected - just setting price');
       setSelectedPrice(orderData.price.toString());
       setOrderTab(isSellOrder ? 'buy' : 'sell');
+      setExecuteError('Connect wallet to execute orders');
+      setTimeout(() => setExecuteError(null), 3000);
       return;
     }
 
@@ -109,9 +124,9 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         expires: order.expires,
         nonce: order.nonce,
         user: order.user,
-        v: order.v,
-        r: order.r,
-        s: order.s,
+        v: Number(order.v),
+        r: order.r!,
+        s: order.s!,
         hash: order.hash || '',
       };
 
@@ -130,8 +145,12 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       console.error('Trade execution error:', err);
       if (err.code === 'ACTION_REJECTED') {
         setExecuteError('Transaction rejected');
+      } else if (err.reason) {
+        setExecuteError(err.reason);
+      } else if (err.message?.includes('insufficient')) {
+        setExecuteError('Insufficient balance in exchange');
       } else {
-        setExecuteError(err.reason || err.message || 'Trade failed');
+        setExecuteError(err.message || 'Trade failed');
       }
       setTimeout(() => setExecuteError(null), 5000);
     } finally {

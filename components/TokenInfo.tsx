@@ -76,136 +76,131 @@ export default function TokenInfo({ token }: TokenInfoProps) {
 
   return (
     <div className="card-neon">
-      <div className="flex gap-3">
-        {/* Left: Token Logo */}
-        <div className="relative w-14 h-14 flex-shrink-0">
-          <Image
-            src={imageError ? '/tokens/empty-token.png' : token.logo}
-            alt={token.symbol}
-            fill
-            className="rounded-xl object-cover"
-            onError={() => setImageError(true)}
-            priority
-          />
+      <div className="flex gap-4">
+        {/* LEFT SIDE: Token Info */}
+        <div className="flex gap-3 min-w-[320px]">
+          {/* Token Logo */}
+          <div className="relative w-12 h-12 flex-shrink-0">
+            <Image
+              src={imageError ? '/tokens/empty-token.png' : token.logo}
+              alt={token.symbol}
+              fill
+              className="rounded-xl object-cover"
+              onError={() => setImageError(true)}
+              priority
+            />
+          </div>
+
+          {/* Token Details */}
+          <div className="flex-1 min-w-0">
+            {/* Row 1: Symbol/ETH + Name */}
+            <div className="flex items-center gap-2 mb-0.5">
+              <h2 className="text-lg font-display font-bold">{token.symbol}</h2>
+              <span className="text-gray-500">/</span>
+              <span className="text-gray-400 text-sm">ETH</span>
+              <span className="text-gray-500 text-sm ml-1">{token.name}</span>
+            </div>
+            
+            {/* Row 2: Description */}
+            <p className="text-xs text-gray-500 mb-1 line-clamp-2">
+              {token.description}
+            </p>
+
+            {/* Row 3: Contract Address */}
+            <div className="flex items-center gap-1">
+              <code className="text-xs text-gray-500 font-mono">
+                {token.address.slice(0, 6)}...{token.address.slice(-4)}
+              </code>
+              <button
+                onClick={handleCopyAddress}
+                className="p-0.5 hover:bg-white/5 rounded transition-colors"
+                title="Copy address"
+              >
+                {copied ? (
+                  <Check className="w-3 h-3 text-green-400" />
+                ) : (
+                  <Copy className="w-3 h-3 text-gray-500" />
+                )}
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Middle: Token Info */}
-        <div className="flex-1 min-w-0 max-w-[280px]">
-          {/* Row 1: Symbol / ETH + Name */}
-          <div className="flex items-center gap-2 mb-0.5">
-            <h2 className="text-lg font-display font-bold">{token.symbol}</h2>
-            <span className="text-gray-500">/</span>
-            <span className="text-gray-400 text-sm">ETH</span>
-            <span className="text-gray-500 text-sm ml-1">{token.name}</span>
-          </div>
-          
-          {/* Row 2: Description (truncated) */}
-          <p className="text-xs text-gray-500 mb-1.5 line-clamp-1">
-            {token.description}
-          </p>
-
-          {/* Row 3: Contract Address only */}
-          <div className="flex items-center gap-1">
-            <code className="text-xs text-gray-500 font-mono">
-              {token.address.slice(0, 6)}...{token.address.slice(-4)}
-            </code>
-            <button
-              onClick={handleCopyAddress}
-              className="p-0.5 hover:bg-white/5 rounded transition-colors"
-              title="Copy address"
-            >
-              {copied ? (
-                <Check className="w-3 h-3 text-green-400" />
-              ) : (
-                <Copy className="w-3 h-3 text-gray-500" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Stats Grid */}
-        <div className="flex-1 border-l border-white/5 pl-3">
-          {/* Row 1: Price & Volume */}
-          <div className="grid grid-cols-2 gap-x-4 mb-1.5">
+        {/* RIGHT SIDE: Analytics */}
+        <div className="flex-1 border-l border-white/5 pl-4">
+          {/* Row 1: Price, Volume, Bid, Ask */}
+          <div className="flex items-center gap-6 mb-1">
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">Price</p>
-              <p className="text-sm font-bold font-mono">
+              <span className="text-[10px] text-gray-500 uppercase">Price </span>
+              <span className="text-sm font-bold font-mono">
                 {priceStats.currentPrice > 0 ? formatOrderBookPrice(priceStats.currentPrice) : '—'}
-                <span className="text-[10px] text-gray-500 ml-0.5">ETH</span>
-              </p>
+              </span>
+              <span className="text-[10px] text-gray-500 ml-0.5">ETH</span>
             </div>
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">24H Vol</p>
-              <p className="text-sm font-bold font-mono">
+              <span className="text-[10px] text-gray-500 uppercase">24H Vol </span>
+              <span className="text-sm font-bold font-mono">
                 {priceStats.volume24h > 0 ? formatDisplayAmount(priceStats.volume24h) : '—'}
-                <span className="text-[10px] text-gray-500 ml-0.5">ETH</span>
-              </p>
+              </span>
+              <span className="text-[10px] text-gray-500 ml-0.5">ETH</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-500">Bid:</span>
+              <span className="text-sm font-mono text-trade-buy ml-1">{formatDisplayAmount(depth.totalBidETH)}</span>
+            </div>
+            <div>
+              <span className="text-[10px] text-gray-500">Ask:</span>
+              <span className="text-sm font-mono text-trade-sell ml-1">{formatDisplayAmount(depth.totalAskETH)}</span>
             </div>
           </div>
           
           {/* Row 2: Change, High, Low, Trades */}
-          <div className="grid grid-cols-4 gap-x-2 mb-1.5">
+          <div className="flex items-center gap-6 mb-1">
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">Change</p>
-              <p className={`text-xs font-semibold ${
+              <span className="text-[10px] text-gray-500 uppercase">Change </span>
+              <span className={`text-xs font-semibold ${
                 priceStats.priceChange > 0 ? 'text-trade-buy' : 
                 priceStats.priceChange < 0 ? 'text-trade-sell' : 'text-gray-400'
               }`}>
                 {priceStats.priceChange !== 0 
                   ? `${priceStats.priceChange > 0 ? '+' : ''}${priceStats.priceChange.toFixed(2)}%`
                   : '—'}
-              </p>
+              </span>
             </div>
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">High</p>
-              <p className="text-xs font-mono">{priceStats.high24h > 0 ? formatOrderBookPrice(priceStats.high24h) : '—'}</p>
+              <span className="text-[10px] text-gray-500 uppercase">High </span>
+              <span className="text-xs font-mono">{priceStats.high24h > 0 ? formatOrderBookPrice(priceStats.high24h) : '—'}</span>
             </div>
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">Low</p>
-              <p className="text-xs font-mono">{priceStats.low24h > 0 ? formatOrderBookPrice(priceStats.low24h) : '—'}</p>
+              <span className="text-[10px] text-gray-500 uppercase">Low </span>
+              <span className="text-xs font-mono">{priceStats.low24h > 0 ? formatOrderBookPrice(priceStats.low24h) : '—'}</span>
             </div>
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">Trades</p>
-              <p className="text-xs font-mono">{priceStats.trades24h > 0 ? priceStats.trades24h : '—'}</p>
+              <span className="text-[10px] text-gray-500 uppercase">Trades </span>
+              <span className="text-xs font-mono">{priceStats.trades24h > 0 ? priceStats.trades24h : '—'}</span>
             </div>
           </div>
 
-          {/* Row 3: Links + Depth on same row */}
-          <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
-            {/* Links */}
-            <div className="flex items-center gap-3">
-              {token.website && (
-                <a href={token.website} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
-                  <Globe className="w-3 h-3" />Website
-                </a>
-              )}
-              {token.etherscan && (
-                <a href={token.etherscan} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
-                  <FileText className="w-3 h-3" />Etherscan
-                </a>
-              )}
-              {token.tracker && (
-                <a href={token.tracker} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
-                  <BarChart3 className="w-3 h-3" />Tracker
-                </a>
-              )}
-            </div>
-            {/* Depth */}
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1">
-                <Layers className="w-2.5 h-2.5 text-gray-500" />
-                <span className="text-[10px] text-gray-500">Bid:</span>
-                <span className="text-xs font-mono text-trade-buy">{formatDisplayAmount(depth.totalBidETH)}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Layers className="w-2.5 h-2.5 text-gray-500" />
-                <span className="text-[10px] text-gray-500">Ask:</span>
-                <span className="text-xs font-mono text-trade-sell">{formatDisplayAmount(depth.totalAskETH)}</span>
-              </div>
-            </div>
+          {/* Row 3: Links */}
+          <div className="flex items-center gap-4">
+            {token.website && (
+              <a href={token.website} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
+                <Globe className="w-3 h-3" />Website
+              </a>
+            )}
+            {token.etherscan && (
+              <a href={token.etherscan} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
+                <FileText className="w-3 h-3" />Etherscan
+              </a>
+            )}
+            {token.tracker && (
+              <a href={token.tracker} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-afrodex-orange hover:text-afrodex-orange-light transition-colors">
+                <BarChart3 className="w-3 h-3" />Tracker
+              </a>
+            )}
           </div>
         </div>
       </div>

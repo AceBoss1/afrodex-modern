@@ -218,26 +218,29 @@ export default function TradePage() {
 
       {/* Main Content - 2 Column Layout */}
       <main className="flex-1 flex overflow-hidden">
-        {/* Left Column - Token Info + Chart + Recent Trades + My Transactions */}
+        {/* Left Column - Token Info + Chart + Scrollable (Recent Trades + My Transactions) */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0 max-w-[calc(100%-420px)]">
-          {/* Token Info Header */}
-          <div className="p-2 pb-0">
+          {/* Token Info Header - Fixed */}
+          <div className="p-2 pb-0 flex-shrink-0">
             <TokenInfo token={baseToken} />
           </div>
 
-          {/* Chart */}
-          <div className="flex-1 p-2 min-h-[280px]">
+          {/* Chart - Fixed height */}
+          <div className="p-2 min-h-[250px] flex-shrink-0">
             <TradingChart baseToken={baseToken} quoteToken={quoteToken} />
           </div>
           
-          {/* Recent Trades */}
-          <div className="h-[200px] p-2 pt-0">
-            <TradeHistory baseToken={baseToken} quoteToken={quoteToken} />
-          </div>
+          {/* Recent Trades + My Transactions - Scrollable together */}
+          <div className="flex-1 overflow-y-auto p-2 pt-0">
+            {/* Recent Trades */}
+            <div className="mb-4">
+              <TradeHistory baseToken={baseToken} quoteToken={quoteToken} />
+            </div>
 
-          {/* My Transactions */}
-          <div className="h-[220px] p-2 pt-0">
-            <MyTransactions baseToken={baseToken} quoteToken={quoteToken} />
+            {/* My Transactions */}
+            <div>
+              <MyTransactions baseToken={baseToken} quoteToken={quoteToken} />
+            </div>
           </div>
         </div>
 

@@ -132,16 +132,22 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
     // If placing a sell order, look for buy orders at or above the price
     const counterOrders = isBuyOrder ? sellOrders : buyOrders;
     
-    return counterOrders.filter(order => {
-      if (!order.v || !order.r || !order.s) return false; // Must have signature
-      if (order.user?.toLowerCase() === address?.toLowerCase()) return false; // Skip own orders
-      
+    console.log(`Finding matching orders: ${isBuyOrder ? 'BUY' : 'SELL'} at price ${targetPrice}`);
+    console.log(`Counter orders count: ${counterOrders.length}`);
+    
+    const matched = counterOrders.filter(order => {
+      const hasSignature = !!(order.v && order.r && order.s);
+      const isOwnOrder = order.user?.toLowerCase() === address?.toLowerCase();
       const orderPrice = order.price || 0;
-      if (isBuyOrder) {
-        return orderPrice <= targetPrice; // For buy, take sell orders at or below our price
-      } else {
-        return orderPrice >= targetPrice; // For sell, take buy orders at or above our price
-      }
+      const priceMatch = isBuyOrder 
+        ? orderPrice <= targetPrice 
+        : orderPrice >= targetPrice;
+      
+      console.log(`Order: price=${orderPrice}, hasSignature=${hasSignature}, isOwnOrder=${isOwnOrder}, priceMatch=${priceMatch}`);
+      
+      if (!hasSignature) return false;
+      if (isOwnOrder) return false;
+      return priceMatch;
     }).sort((a, b) => {
       // Sort by best price first
       if (isBuyOrder) {
@@ -150,6 +156,9 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         return (b.price || 0) - (a.price || 0); // Highest price first for sells
       }
     });
+    
+    console.log(`Matched orders: ${matched.length}`);
+    return matched;
   };
 
   // Handle placing order with smart matching
@@ -215,7 +224,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
             expires: order.expires,
             nonce: order.nonce,
             user: order.user,
-            v: order.v!,
+            v: Number(order.v),
             r: order.r!,
             s: order.s!,
             hash: order.hash || '',
@@ -224,7 +233,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           // Calculate the wei amount to trade
           const amountInWei = parseAmount(amountToTake.toString(), baseToken.decimals);
           
-          console.log(`Executing trade: ${amountToTake} @ ${order.price}`);
+          console.log(`Executing trade: ${amountToTake} @ ${order.price}`, signedOrder);
           const tx = await executeTrade(signer, signedOrder, amountInWei);
           await tx.wait();
           

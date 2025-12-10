@@ -31,8 +31,14 @@ function dbOrderToOrder(dbOrder: DbOrder, baseToken: Token, quoteToken: Token): 
     nonce: dbOrder.nonce,
     user: dbOrder.user_address,
     availableVolume: dbOrder.amount_get,
+    amountFilled: dbOrder.amount_filled || '0',
     side: dbOrder.side,
     price: dbOrder.price,
+    // Include signature fields for trade execution (ensure proper types)
+    v: dbOrder.v !== undefined ? Number(dbOrder.v) : undefined,
+    r: dbOrder.r || undefined,
+    s: dbOrder.s || undefined,
+    hash: dbOrder.order_hash || undefined,
   };
 }
 

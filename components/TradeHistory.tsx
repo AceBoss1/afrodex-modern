@@ -39,7 +39,7 @@ export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProp
 
   if (isLoadingTrades) {
     return (
-      <div className="card h-full flex items-center justify-center">
+      <div className="card flex items-center justify-center py-8">
         <div className="text-center">
           <div className="spinner mb-3" />
           <p className="text-sm text-gray-500">Loading trades...</p>
@@ -49,7 +49,7 @@ export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProp
   }
 
   return (
-    <div className="card h-full flex flex-col overflow-hidden">
+    <div className="card flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -70,10 +70,10 @@ export default function TradeHistory({ baseToken, quoteToken }: TradeHistoryProp
         <span className="w-6"></span>
       </div>
 
-      {/* Trade List */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      {/* Trade List - No internal scroll */}
+      <div className="min-h-0">
         {trades.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+          <div className="flex flex-col items-center justify-center py-8 text-gray-500">
             <History className="w-10 h-10 mb-3 opacity-30" />
             <p className="text-sm">No trades yet</p>
             <p className="text-xs text-gray-600 mt-1">Recent trades will appear here</p>

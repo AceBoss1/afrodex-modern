@@ -346,8 +346,8 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
         ))}
       </div>
 
-      {/* Content */}
-      <div className="max-h-48 overflow-y-auto">
+      {/* Content - No internal scroll, flows naturally */}
+      <div>
         {/* Orders Tab */}
         {activeTab === 'orders' && (
           <>
