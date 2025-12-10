@@ -2,10 +2,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useAccount, useWalletClient } from 'wagmi';
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { ethers } from 'ethers';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder } from '@/lib/exchange';
+import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder, preTradeCheck } from '@/lib/exchange';
 import { Token } from '@/lib/tokens';
 import { ArrowDown, ArrowUp, BookOpen, Loader2 } from 'lucide-react';
 
@@ -19,6 +19,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const { setSelectedPrice, setOrderTab } = useUIStore();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient();
   
   const [executingOrder, setExecutingOrder] = useState<string | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
@@ -133,7 +134,19 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       // Execute full amount available
       const amountToTrade = order.availableVolume || order.amountGet;
       
-      console.log('Executing trade:', { signedOrder, amountToTrade });
+      // Pre-trade check to identify issues before sending transaction
+      console.log('Running pre-trade check...');
+      const preCheck = await preTradeCheck(provider, signedOrder, amountToTrade, address!);
+      
+      if (!preCheck.canTrade) {
+        console.error('Pre-trade check failed:', preCheck.reason);
+        setExecuteError(preCheck.reason || 'Trade validation failed');
+        setTimeout(() => setExecuteError(null), 8000);
+        setExecutingOrder(null);
+        return;
+      }
+      
+      console.log('Pre-trade check passed, executing trade:', { signedOrder, amountToTrade });
       
       const tx = await executeTrade(signer, signedOrder, amountToTrade);
       console.log('Trade tx:', tx.hash);

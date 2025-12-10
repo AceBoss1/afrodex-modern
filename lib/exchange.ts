@@ -365,6 +365,124 @@ export async function cancelOrder(
 // ============================================
 
 /**
+ * Test if a trade can be executed (calls contract's testTrade)
+ */
+export async function testTrade(
+  provider: Provider,
+  order: SignedOrder,
+  amount: string,
+  takerAddress: string
+): Promise<boolean> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  try {
+    const canTrade = await contract.testTrade(
+      order.tokenGet,
+      order.amountGet,
+      order.tokenGive,
+      order.amountGive,
+      order.expires,
+      order.nonce,
+      order.user,
+      order.v,
+      order.r,
+      order.s,
+      amount,
+      takerAddress
+    );
+    return canTrade;
+  } catch (error) {
+    console.warn('testTrade failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Pre-trade validation - checks all conditions and returns reason if trade would fail
+ */
+export async function preTradeCheck(
+  provider: Provider,
+  order: SignedOrder,
+  amount: string,
+  takerAddress: string
+): Promise<{ canTrade: boolean; reason?: string }> {
+  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+  
+  try {
+    // 1. Check if order is expired
+    const currentBlock = await provider.getBlockNumber();
+    if (parseInt(order.expires) <= currentBlock) {
+      return { canTrade: false, reason: `Order expired (block ${order.expires} < current ${currentBlock})` };
+    }
+
+    // 2. Check available volume
+    const availableVolume = await contract.availableVolume(
+      order.tokenGet,
+      order.amountGet,
+      order.tokenGive,
+      order.amountGive,
+      order.expires,
+      order.nonce,
+      order.user,
+      order.v,
+      order.r,
+      order.s
+    );
+    
+    if (availableVolume.toString() === '0') {
+      return { canTrade: false, reason: 'Order fully filled or invalid signature' };
+    }
+
+    const amountBigInt = BigInt(amount);
+    if (amountBigInt > availableVolume) {
+      return { canTrade: false, reason: `Amount exceeds available (${amount} > ${availableVolume})` };
+    }
+
+    // 3. Check taker's balance for tokenGet
+    const takerBalance = await contract.balanceOf(order.tokenGet, takerAddress);
+    // Calculate how much taker needs to pay
+    // For sell orders: tokenGet is ETH, taker pays ETH
+    // amount is the amount of tokenGet taker will receive from maker
+    // Taker needs to send proportional tokenGive
+    const amountGiveNeeded = (amountBigInt * BigInt(order.amountGive)) / BigInt(order.amountGet);
+    
+    // Actually, for trade() function:
+    // - amount is how much of tokenGet taker wants
+    // - taker pays proportional tokenGive
+    const takerBalanceGive = await contract.balanceOf(order.tokenGive, takerAddress);
+    if (takerBalanceGive < amountGiveNeeded) {
+      return { 
+        canTrade: false, 
+        reason: `Insufficient balance: need ${amountGiveNeeded.toString()} but have ${takerBalanceGive.toString()}` 
+      };
+    }
+
+    // 4. Final test with contract
+    const canTrade = await contract.testTrade(
+      order.tokenGet,
+      order.amountGet,
+      order.tokenGive,
+      order.amountGive,
+      order.expires,
+      order.nonce,
+      order.user,
+      order.v,
+      order.r,
+      order.s,
+      amount,
+      takerAddress
+    );
+
+    if (!canTrade) {
+      return { canTrade: false, reason: 'Contract testTrade returned false (check maker balance or signature)' };
+    }
+
+    return { canTrade: true };
+  } catch (error: any) {
+    return { canTrade: false, reason: error.message || 'Pre-trade check failed' };
+  }
+}
+
+/**
  * Check available volume for an order
  */
 export async function getAvailableVolume(
@@ -567,7 +685,7 @@ export function formatFullBalance(amount: string, decimals: number): string {
 
 /**
  * Format for order book display - needs to fit in column
- * Price: up to 14 decimal places for very small prices
+ * Price: up to 15 decimal places for very small prices like AfroX
  * Amount: full number with commas, no decimals for large numbers
  */
 export function formatOrderBookPrice(price: number): string {
@@ -578,11 +696,17 @@ export function formatOrderBookPrice(price: number): string {
   if (absPrice >= 1) {
     return price.toFixed(6);
   }
+  if (absPrice >= 0.0001) {
+    return price.toFixed(8);
+  }
   if (absPrice >= 0.000001) {
     return price.toFixed(10);
   }
-  // For very small prices like 0.000000009998
-  return price.toFixed(14);
+  if (absPrice >= 0.000000001) {
+    return price.toFixed(12);
+  }
+  // For very small prices like 0.000000000003239 (AfroX)
+  return price.toFixed(15);
 }
 
 /**

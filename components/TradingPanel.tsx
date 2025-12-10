@@ -15,6 +15,7 @@ import {
   generateNonce,
   getExpirationBlock,
   executeTrade,
+  preTradeCheck,
   SignedOrder,
 } from '@/lib/exchange';
 import { saveSignedOrder, isSupabaseConfigured, cancelOrderByHash } from '@/lib/supabase';
@@ -200,6 +201,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
       const matchingOrders = findMatchingOrders(priceNum, orderTab === 'buy');
       let remainingAmount = amountNum;
       let executedTrades = 0;
+      let skippedOrders: string[] = [];
 
       // Execute against matching orders first
       for (const order of matchingOrders) {
@@ -233,6 +235,14 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           // Calculate the wei amount to trade
           const amountInWei = parseAmount(amountToTake.toString(), baseToken.decimals);
           
+          // Pre-check before executing
+          const preCheck = await preTradeCheck(provider, signedOrder, amountInWei, address!);
+          if (!preCheck.canTrade) {
+            console.log(`Skipping order: ${preCheck.reason}`);
+            skippedOrders.push(preCheck.reason || 'Unknown');
+            continue;
+          }
+          
           console.log(`Executing trade: ${amountToTake} @ ${order.price}`, signedOrder);
           const tx = await executeTrade(signer, signedOrder, amountInWei);
           await tx.wait();
@@ -240,8 +250,9 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           remainingAmount -= amountToTake;
           executedTrades++;
           console.log(`Trade executed. Remaining: ${remainingAmount}`);
-        } catch (err) {
+        } catch (err: any) {
           console.error('Error executing trade against order:', err);
+          skippedOrders.push(err.reason || err.message || 'Trade failed');
           // Continue to next order
         }
       }
@@ -295,12 +306,24 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         });
 
         if (executedTrades > 0) {
-          setSuccess(`Executed ${executedTrades} trade(s), placed order for ${remainingAmount.toFixed(4)} ${baseToken.symbol}`);
+          let msg = `Executed ${executedTrades} trade(s), placed order for ${remainingAmount.toFixed(4)} ${baseToken.symbol}`;
+          if (skippedOrders.length > 0) {
+            msg += ` (${skippedOrders.length} orders skipped)`;
+          }
+          setSuccess(msg);
+        } else if (skippedOrders.length > 0) {
+          // No trades executed, show why
+          setError(`Could not execute trades: ${skippedOrders[0]}`);
+          setSuccess(`Order placed (gasless) - matching orders unavailable`);
         } else {
           setSuccess(`${orderTab === 'buy' ? 'Buy' : 'Sell'} order placed! (Gasless)`);
         }
       } else {
-        setSuccess(`Executed ${executedTrades} trade(s) - order fully filled!`);
+        let msg = `Executed ${executedTrades} trade(s) - order fully filled!`;
+        if (skippedOrders.length > 0) {
+          msg += ` (${skippedOrders.length} orders skipped)`;
+        }
+        setSuccess(msg);
       }
 
       // Clear form
