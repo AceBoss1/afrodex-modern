@@ -275,6 +275,7 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
         v: order.v,
         r: order.r,
         s: order.s,
+        hash: order.orderHash, // Add the required hash property
       });
 
       await tx.wait();
