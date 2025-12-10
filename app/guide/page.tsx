@@ -87,13 +87,13 @@ export default function GuidePage() {
               <p>Connect your Ethereum wallet to start trading. We support MetaMask, WalletConnect, and other popular wallets.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
                 <li>Visit <a href="https://dex.afrox.one" className="text-afrodex-orange hover:underline">dex.afrox.one</a></li>
-                <li>Click <strong>"Connect Wallet"</strong> in the top right corner</li>
+                <li>Click <strong>&ldquo;Connect Wallet&rdquo;</strong> in the top right corner</li>
                 <li>Select your wallet provider (MetaMask, WalletConnect, etc.)</li>
                 <li>Approve the connection request in your wallet</li>
                 <li>Verify the connected address is correct</li>
               </ol>
               <div className="bg-afrodex-black-lighter rounded-lg p-3 text-sm">
-                <strong className="text-afrodex-orange">💡 Tip:</strong> Always verify you're on the correct URL 
+                <strong className="text-afrodex-orange">💡 Tip:</strong> Always verify you&apos;re on the correct URL 
                 (<code className="bg-black/30 px-1 rounded">dex.afrox.one</code>) before connecting your wallet.
               </div>
             </div>
@@ -111,10 +111,10 @@ export default function GuidePage() {
               </div>
             </div>
             <div className="space-y-3 text-gray-300">
-              <p>Trade any ERC-20 token — even if it's not officially listed. Just add the token contract address.</p>
+              <p>Trade any ERC-20 token — even if it&apos;s not officially listed. Just add the token contract address.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
-                <li>Click <strong>"+ Add Custom Token"</strong> in the sidebar</li>
-                <li>Paste the token's contract address</li>
+                <li>Click <strong>&ldquo;+ Add Custom Token&rdquo;</strong> in the sidebar</li>
+                <li>Paste the token&apos;s contract address</li>
                 <li>The token info will be automatically loaded</li>
                 <li>Click the <strong>⭐ star</strong> to add it to your favorites</li>
               </ol>
@@ -139,13 +139,13 @@ export default function GuidePage() {
             <div className="space-y-3 text-gray-300">
               <p>Before trading, you need to deposit funds to the AfroDex smart contract.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
-                <li>Find the <strong>"Balances"</strong> section on the right side</li>
+                <li>Find the <strong>&ldquo;Balances&rdquo;</strong> section on the right side</li>
                 <li>Enter the amount you want to deposit</li>
-                <li>Click <strong>"Deposit"</strong></li>
-                <li>Approve the transaction in your wallet (you'll pay gas fees)</li>
+                <li>Click <strong>&ldquo;Deposit&rdquo;</strong></li>
+                <li>Approve the transaction in your wallet (you&apos;ll pay gas fees)</li>
                 <li>Wait for the transaction to confirm</li>
               </ol>
-              <p className="text-sm">Your balance will appear in the <strong>"Exchange Balance"</strong> section once confirmed.</p>
+              <p className="text-sm">Your balance will appear in the <strong>&ldquo;Exchange Balance&rdquo;</strong> section once confirmed.</p>
             </div>
           </section>
 
@@ -163,7 +163,7 @@ export default function GuidePage() {
             <div className="space-y-3 text-gray-300">
               <p>Create limit orders to buy or sell tokens at your desired price.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
-                <li>Go to the <strong>"Place Order"</strong> section</li>
+                <li>Go to the <strong>&ldquo;Place Order&rdquo;</strong> section</li>
                 <li>Select <span className="text-trade-buy font-semibold">BUY</span> or <span className="text-trade-sell font-semibold">SELL</span></li>
                 <li>Enter your desired <strong>price</strong> (in ETH)</li>
                 <li>Enter the <strong>amount</strong> of tokens</li>
@@ -220,9 +220,9 @@ export default function GuidePage() {
             <div className="space-y-3 text-gray-300">
               <p>Withdraw your ETH and tokens back to your wallet at any time.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
-                <li>Go to the <strong>"Balances"</strong> section</li>
+                <li>Go to the <strong>&ldquo;Balances&rdquo;</strong> section</li>
                 <li>Enter the amount to withdraw</li>
-                <li>Click <strong>"Withdraw"</strong></li>
+                <li>Click <strong>&ldquo;Withdraw&rdquo;</strong></li>
                 <li>Confirm the transaction in your wallet</li>
               </ol>
               <p className="text-sm">You can also <strong>Transfer</strong> tokens directly to any ERC-20 wallet address.</p>
@@ -241,10 +241,10 @@ export default function GuidePage() {
               </div>
             </div>
             <div className="space-y-3 text-gray-300">
-              <p>You can cancel any open order at any time from the "My Transactions" section.</p>
+              <p>You can cancel any open order at any time from the &ldquo;My Transactions&rdquo; section.</p>
               <ol className="list-decimal list-inside space-y-2 text-sm">
-                <li>Find the <strong>"My Transactions"</strong> section below Recent Trades</li>
-                <li>Click the <strong>"Orders"</strong> tab to see your open orders</li>
+                <li>Find the <strong>&ldquo;My Transactions&rdquo;</strong> section below Recent Trades</li>
+                <li>Click the <strong>&ldquo;Orders&rdquo;</strong> tab to see your open orders</li>
                 <li>Each order shows a <strong>fill meter</strong> indicating how much has been executed</li>
                 <li>Click the <strong>X</strong> button to cancel an order</li>
                 <li>Only the remaining unfilled portion will be cancelled</li>
@@ -272,7 +272,7 @@ export default function GuidePage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-green-400 mt-0.5" />
-                  <span>You can adjust gas settings in your wallet's approval window</span>
+                  <span>You can adjust gas settings in your wallet&apos;s approval window</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-green-400 mt-0.5" />
