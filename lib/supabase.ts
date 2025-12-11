@@ -143,6 +143,13 @@ export async function saveSignedOrder(order: SignedOrderInput): Promise<{ succes
     return { success: false, error: 'Supabase not configured' };
   }
 
+  console.log('=== SAVING ORDER TO SUPABASE ===');
+  console.log('v:', order.v, 'type:', typeof order.v);
+  console.log('r:', order.r, 'length:', order.r?.length);
+  console.log('s:', order.s, 'length:', order.s?.length);
+  console.log('hash:', order.order_hash);
+  console.log('================================');
+
   const dbOrder = {
     tx_hash: order.order_hash, // Use order_hash as tx_hash for off-chain orders
     log_index: 0,

@@ -18,6 +18,13 @@ function getCacheKey(baseToken: Token, quoteToken: Token): string {
  * Convert DB order to Order type
  */
 function dbOrderToOrder(dbOrder: DbOrder, baseToken: Token, quoteToken: Token): Order {
+  console.log('=== LOADING ORDER FROM DB ===');
+  console.log('DB v:', dbOrder.v, 'type:', typeof dbOrder.v);
+  console.log('DB r:', dbOrder.r, 'length:', dbOrder.r?.length);
+  console.log('DB s:', dbOrder.s, 'length:', dbOrder.s?.length);
+  console.log('DB hash:', dbOrder.order_hash);
+  console.log('=============================');
+  
   return {
     tokenGet: dbOrder.token_get,
     amountGet: dbOrder.amount_get,
@@ -31,7 +38,7 @@ function dbOrderToOrder(dbOrder: DbOrder, baseToken: Token, quoteToken: Token): 
     side: dbOrder.side,
     price: dbOrder.price,
     // Include signature fields for trade execution (ensure proper types)
-    v: dbOrder.v !== undefined ? Number(dbOrder.v) : undefined,
+    v: dbOrder.v !== undefined && dbOrder.v !== null ? Number(dbOrder.v) : undefined,
     r: dbOrder.r || undefined,
     s: dbOrder.s || undefined,
     hash: dbOrder.order_hash || undefined,

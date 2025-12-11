@@ -219,59 +219,58 @@ export async function withdrawToken(
 // ============================================
 
 /**
- * Generate order hash for signing (EtherDelta uses sha256)
- * Contract: sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce)
+ * Generate order hash for signing (AfroDex uses sha256)
+ * Contract: bytes32 hash = sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce);
+ * 
+ * In Solidity 0.4.x: sha256(a, b, c, ...) = sha256(abi.encodePacked(a, b, c, ...))
+ * - address = 20 bytes
+ * - uint256 = 32 bytes
  */
 export function getOrderHash(order: Order): string {
-  // Use checksummed addresses to match Solidity encoding
-  // ethers.getAddress() returns checksummed address
+  // Use checksummed addresses (case doesn't matter for encoding, just for display)
   const contractAddr = ethers.getAddress(EXCHANGE_ADDRESS);
   const tokenGet = ethers.getAddress(order.tokenGet);
   const tokenGive = ethers.getAddress(order.tokenGive);
   
-  // Convert amounts to BigInt for proper uint256 encoding
+  // Convert to BigInt for proper uint256 encoding
   const amountGet = BigInt(order.amountGet);
   const amountGive = BigInt(order.amountGive);
   const expires = BigInt(order.expires);
   const nonce = BigInt(order.nonce);
   
-  // EtherDelta/ForkDelta uses sha256 with abi.encodePacked
+  // Use solidityPacked (equivalent to Solidity's abi.encodePacked)
   const packed = solidityPacked(
     ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
-    [
-      contractAddr,
-      tokenGet,
-      amountGet,
-      tokenGive,
-      amountGive,
-      expires,
-      nonce,
-    ]
+    [contractAddr, tokenGet, amountGet, tokenGive, amountGive, expires, nonce]
   );
   
-  // Use sha256 for EtherDelta compatibility
+  // Use sha256 (same as Solidity)
   const hash = ethers.sha256(packed);
   
-  console.log('Order hash calculation:', {
-    contractAddr,
-    tokenGet,
-    amountGet: amountGet.toString(),
-    tokenGive,
-    amountGive: amountGive.toString(),
-    expires: expires.toString(),
-    nonce: nonce.toString(),
-    packedHex: packed,
-    packedLength: packed.length,
-    hash,
-  });
+  console.log('=== ORDER HASH CALCULATION ===');
+  console.log('Contract address:', contractAddr);
+  console.log('tokenGet:', tokenGet);
+  console.log('amountGet:', amountGet.toString());
+  console.log('tokenGive:', tokenGive);
+  console.log('amountGive:', amountGive.toString());
+  console.log('expires:', expires.toString());
+  console.log('nonce:', nonce.toString());
+  console.log('Packed bytes:', packed);
+  console.log('Packed length:', (packed.length - 2) / 2, 'bytes'); // -2 for '0x', /2 for hex
+  console.log('SHA256 hash:', hash);
+  console.log('==============================');
   
   return hash;
 }
 
 /**
- * Sign an order (EtherDelta style)
- * EtherDelta contract uses: ecrecover(sha3("\x19Ethereum Signed Message:\n32", hash), v, r, s)
- * So we need to sign the raw hash WITH the Ethereum prefix (signMessage does this)
+ * Sign an order (AfroDex contract style)
+ * 
+ * Contract verification:
+ * 1. hash = sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce)
+ * 2. ecrecover(sha3("\x19Ethereum Signed Message:\n32", hash), v, r, s) == user
+ * 
+ * sha3 in old Solidity = keccak256
  */
 export async function signOrder(
   signer: Signer,
@@ -280,52 +279,68 @@ export async function signOrder(
   const hash = getOrderHash(order);
   const signerAddress = await signer.getAddress();
   
-  console.log('Signing order with hash:', hash);
-  console.log('Signer address:', signerAddress);
+  console.log('=== SIGNING ORDER ===');
+  console.log('Order hash (sha256):', hash);
+  console.log('Signer:', signerAddress);
   
-  // Get the hash as bytes
+  // Convert hash to bytes for signing
   const hashBytes = ethers.getBytes(hash);
+  console.log('Hash bytes length:', hashBytes.length);
   
-  // Sign the hash with personal_sign (adds Ethereum prefix automatically)
-  // This produces: sign(keccak256("\x19Ethereum Signed Message:\n32" + hash))
+  // Sign the hash - signMessage adds Ethereum prefix automatically
+  // This produces: sign(keccak256("\x19Ethereum Signed Message:\n32" + hashBytes))
   const signature = await signer.signMessage(hashBytes);
+  console.log('Full signature:', signature);
   
-  console.log('Raw signature:', signature);
-  
+  // Parse signature components
   const sig = ethers.Signature.from(signature);
   
-  console.log('Parsed signature:', {
-    v: sig.v,
-    r: sig.r,
-    s: sig.s,
-    yParity: sig.yParity,
-  });
-  
-  // EtherDelta expects v to be 27 or 28
+  // EtherDelta/ForkDelta expects v to be 27 or 28
   let v = sig.v;
-  if (v < 27) {
-    v += 27;
-  }
+  if (v < 27) v += 27;
   
-  // Verify signature can be recovered
-  const recoveredAddress = ethers.verifyMessage(hashBytes, signature);
-  console.log('Signature verification:', {
-    signerAddress,
-    recoveredAddress,
-    match: signerAddress.toLowerCase() === recoveredAddress.toLowerCase(),
-    finalV: v,
-  });
+  const r = sig.r;
+  const s = sig.s;
   
-  if (signerAddress.toLowerCase() !== recoveredAddress.toLowerCase()) {
-    throw new Error('Signature verification failed - recovered address does not match signer');
+  console.log('v:', v);
+  console.log('r:', r, 'length:', r.length);
+  console.log('s:', s, 'length:', s.length);
+  
+  // Verify we can recover the address locally (same as contract does)
+  // Contract: ecrecover(sha3("\x19Ethereum Signed Message:\n32", hash), v, r, s)
+  // sha3 = keccak256, and it concatenates the prefix with the hash
+  const prefixedHash = ethers.keccak256(
+    ethers.concat([
+      ethers.toUtf8Bytes('\x19Ethereum Signed Message:\n32'),
+      hashBytes
+    ])
+  );
+  console.log('Prefixed hash (what contract computes):', prefixedHash);
+  
+  // Recover using the prefixed hash (exactly what ecrecover does)
+  const sigObj = ethers.Signature.from({ r, s, v });
+  const recovered = ethers.recoverAddress(prefixedHash, sigObj);
+  console.log('Recovered address:', recovered);
+  console.log('Expected signer:', signerAddress);
+  console.log('MATCH:', recovered.toLowerCase() === signerAddress.toLowerCase());
+  
+  // Also verify using ethers built-in (should give same result)
+  const recoveredBuiltin = ethers.verifyMessage(hashBytes, signature);
+  console.log('Built-in recovery:', recoveredBuiltin);
+  console.log('Built-in MATCH:', recoveredBuiltin.toLowerCase() === signerAddress.toLowerCase());
+  
+  console.log('====================');
+  
+  if (recovered.toLowerCase() !== signerAddress.toLowerCase()) {
+    throw new Error(`Signature verification failed! Recovered ${recovered} but expected ${signerAddress}`);
   }
   
   return {
     ...order,
     hash,
     v,
-    r: sig.r,
-    s: sig.s,
+    r,
+    s,
   };
 }
 
@@ -579,22 +594,67 @@ export async function preTradeCheck(
     // 2. Check available volume (also validates signature)
     let availableVolume;
     try {
-      console.log('Calling availableVolume with params:', {
-        tokenGet: order.tokenGet,
-        amountGet: order.amountGet,
-        tokenGive: order.tokenGive,
-        amountGive: order.amountGive,
-        expires: order.expires,
-        nonce: order.nonce,
-        user: order.user,
-        v: order.v,
-        vType: typeof order.v,
-        r: order.r,
-        rLength: order.r?.length,
-        s: order.s,
-        sLength: order.s?.length,
-      });
+      console.log('=== SIGNATURE VERIFICATION (matching contract logic) ===');
       
+      // Ensure v is a valid number (27 or 28)
+      const v = Number(order.v);
+      console.log('v:', v, '(valid:', v === 27 || v === 28, ')');
+      
+      if (v !== 27 && v !== 28) {
+        return { canTrade: false, reason: `Invalid v value: ${v} (must be 27 or 28)` };
+      }
+      
+      // Ensure r and s are proper hex strings
+      console.log('r:', order.r, 'length:', order.r?.length);
+      console.log('s:', order.s, 'length:', order.s?.length);
+      
+      if (!order.r || !order.s || order.r.length !== 66 || order.s.length !== 66) {
+        return { canTrade: false, reason: `Invalid r/s: r=${order.r?.length} chars, s=${order.s?.length} chars (need 66 each)` };
+      }
+      
+      // Step 1: Recalculate the sha256 hash (same as contract)
+      // Contract: bytes32 hash = sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce);
+      const expectedHash = getOrderHash(order);
+      console.log('Computed hash:', expectedHash);
+      console.log('Stored hash:', order.hash);
+      console.log('Hash match:', expectedHash === order.hash);
+      
+      // Step 2: Compute prefixed hash (same as contract)
+      // Contract: sha3("\x19Ethereum Signed Message:\n32", hash) where sha3 = keccak256
+      const hashBytes = ethers.getBytes(expectedHash);
+      const prefixedHash = ethers.keccak256(
+        ethers.concat([
+          ethers.toUtf8Bytes('\x19Ethereum Signed Message:\n32'),
+          hashBytes
+        ])
+      );
+      console.log('Prefixed hash:', prefixedHash);
+      
+      // Step 3: Recover signer (same as contract's ecrecover)
+      // Contract: ecrecover(prefixedHash, v, r, s) == user
+      try {
+        const sigObj = ethers.Signature.from({ r: order.r, s: order.s, v: v });
+        const recoveredAddress = ethers.recoverAddress(prefixedHash, sigObj);
+        console.log('Recovered address:', recoveredAddress);
+        console.log('Order user:', order.user);
+        console.log('SIGNATURE VALID:', recoveredAddress.toLowerCase() === order.user.toLowerCase());
+        
+        if (recoveredAddress.toLowerCase() !== order.user.toLowerCase()) {
+          console.log('!!! SIGNATURE MISMATCH - This is why the contract rejects it !!!');
+          return { 
+            canTrade: false, 
+            reason: `Signature invalid: recovered ${recoveredAddress.slice(0,10)}... but order is from ${order.user.slice(0,10)}...` 
+          };
+        }
+      } catch (recoverError: any) {
+        console.error('Signature recovery failed:', recoverError);
+        return { canTrade: false, reason: `Signature recovery error: ${recoverError.message}` };
+      }
+      
+      console.log('=== END SIGNATURE VERIFICATION ===');
+      
+      // Now call the contract
+      console.log('Calling contract.availableVolume...');
       availableVolume = await contract.availableVolume(
         order.tokenGet,
         order.amountGet,
@@ -603,11 +663,11 @@ export async function preTradeCheck(
         order.expires,
         order.nonce,
         order.user,
-        order.v,
+        v,
         order.r,
         order.s
       );
-      console.log('availableVolume result:', availableVolume.toString());
+      console.log('Contract availableVolume result:', availableVolume.toString());
     } catch (err: any) {
       console.error('availableVolume call failed:', err);
       return { canTrade: false, reason: `Contract call failed: ${err.message}` };
