@@ -357,6 +357,14 @@ export async function createSignedOrder(
   expires: string,
   nonce: string
 ): Promise<SignedOrder> {
+  // Validate amounts
+  if (!amountGet || amountGet === '0') {
+    throw new Error(`Invalid amountGet: ${amountGet}. Cannot create order with 0 amount.`);
+  }
+  if (!amountGive || amountGive === '0') {
+    throw new Error(`Invalid amountGive: ${amountGive}. Cannot create order with 0 amount.`);
+  }
+  
   const userAddress = await signer.getAddress();
   
   const order: Order = {
@@ -368,6 +376,8 @@ export async function createSignedOrder(
     nonce,
     user: userAddress,
   };
+  
+  console.log('Creating signed order:', order);
   
   // Sign the order (gasless - just a signature)
   const signedOrder = await signOrder(signer, order);
@@ -583,6 +593,20 @@ export async function preTradeCheck(
   });
   
   try {
+    // 0. Check for invalid order amounts (common bug!)
+    if (!order.amountGet || order.amountGet === '0') {
+      return { 
+        canTrade: false, 
+        reason: `Invalid order: amountGet is 0. This order was created with incorrect amounts and cannot be executed. Delete it.` 
+      };
+    }
+    if (!order.amountGive || order.amountGive === '0') {
+      return { 
+        canTrade: false, 
+        reason: `Invalid order: amountGive is 0. This order was created with incorrect amounts and cannot be executed. Delete it.` 
+      };
+    }
+    
     // 1. Check if order is expired
     const currentBlock = await provider.getBlockNumber();
     console.log('Current block:', currentBlock, 'Order expires:', order.expires);
@@ -968,11 +992,25 @@ export function formatOrderBookAmount(amount: number): string {
 
 /**
  * Parse amount to wei with specified decimals
+ * Handles floating point precision issues for very small amounts
  */
 export function parseAmount(amount: string, decimals: number): string {
   try {
-    return parseUnits(amount, decimals).toString();
-  } catch {
+    // Handle scientific notation and very small numbers
+    const num = parseFloat(amount);
+    if (isNaN(num) || num <= 0) {
+      console.warn('parseAmount: invalid or zero amount:', amount);
+      return '0';
+    }
+    
+    // For very small numbers, use fixed notation to avoid scientific notation issues
+    const fixedAmount = num.toFixed(decimals);
+    const result = parseUnits(fixedAmount, decimals).toString();
+    
+    console.log(`parseAmount(${amount}, ${decimals}) = ${result}`);
+    return result;
+  } catch (error) {
+    console.error('parseAmount error:', error, 'amount:', amount, 'decimals:', decimals);
     return '0';
   }
 }

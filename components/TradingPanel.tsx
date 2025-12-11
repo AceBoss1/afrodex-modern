@@ -270,6 +270,26 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         const tokenGive = orderTab === 'buy' ? quoteToken.address : baseToken.address;
         const amountGive = orderTab === 'buy' ? amountQuote : amountBase;
 
+        // CRITICAL: Validate amounts are not 0
+        console.log('=== ORDER CREATION DEBUG ===');
+        console.log('Order type:', orderTab);
+        console.log('remainingAmount:', remainingAmount);
+        console.log('priceNum:', priceNum);
+        console.log('remainingTotal:', remainingTotal);
+        console.log('amountBase (raw):', amountBase);
+        console.log('amountQuote (raw):', amountQuote);
+        console.log('tokenGet:', tokenGet);
+        console.log('amountGet:', amountGet);
+        console.log('tokenGive:', tokenGive);
+        console.log('amountGive:', amountGive);
+        console.log('============================');
+
+        if (amountGet === '0' || amountGive === '0') {
+          setError(`Invalid order: amounts cannot be 0. amountGet=${amountGet}, amountGive=${amountGive}. Try a higher price or amount.`);
+          setLoading(false);
+          return;
+        }
+
         const expires = await getExpirationBlock(provider, 10000);
         const nonce = generateNonce();
 
