@@ -223,10 +223,11 @@ export async function withdrawToken(
  * Contract: sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce)
  */
 export function getOrderHash(order: Order): string {
-  // Ensure all values are properly formatted
-  const contractAddr = EXCHANGE_ADDRESS.toLowerCase();
-  const tokenGet = order.tokenGet.toLowerCase();
-  const tokenGive = order.tokenGive.toLowerCase();
+  // Use checksummed addresses to match Solidity encoding
+  // ethers.getAddress() returns checksummed address
+  const contractAddr = ethers.getAddress(EXCHANGE_ADDRESS);
+  const tokenGet = ethers.getAddress(order.tokenGet);
+  const tokenGive = ethers.getAddress(order.tokenGive);
   
   // Convert amounts to BigInt for proper uint256 encoding
   const amountGet = BigInt(order.amountGet);
@@ -259,6 +260,7 @@ export function getOrderHash(order: Order): string {
     amountGive: amountGive.toString(),
     expires: expires.toString(),
     nonce: nonce.toString(),
+    packedHex: packed,
     packedLength: packed.length,
     hash,
   });
@@ -268,7 +270,8 @@ export function getOrderHash(order: Order): string {
 
 /**
  * Sign an order (EtherDelta style)
- * The contract verifies: ecrecover(sha3("\x19Ethereum Signed Message:\n32", hash), v, r, s) == user
+ * EtherDelta contract uses: ecrecover(sha3("\x19Ethereum Signed Message:\n32", hash), v, r, s)
+ * So we need to sign the raw hash WITH the Ethereum prefix (signMessage does this)
  */
 export async function signOrder(
   signer: Signer,
@@ -277,10 +280,26 @@ export async function signOrder(
   const hash = getOrderHash(order);
   const signerAddress = await signer.getAddress();
   
+  console.log('Signing order with hash:', hash);
+  console.log('Signer address:', signerAddress);
+  
+  // Get the hash as bytes
+  const hashBytes = ethers.getBytes(hash);
+  
   // Sign the hash with personal_sign (adds Ethereum prefix automatically)
   // This produces: sign(keccak256("\x19Ethereum Signed Message:\n32" + hash))
-  const signature = await signer.signMessage(ethers.getBytes(hash));
+  const signature = await signer.signMessage(hashBytes);
+  
+  console.log('Raw signature:', signature);
+  
   const sig = ethers.Signature.from(signature);
+  
+  console.log('Parsed signature:', {
+    v: sig.v,
+    r: sig.r,
+    s: sig.s,
+    yParity: sig.yParity,
+  });
   
   // EtherDelta expects v to be 27 or 28
   let v = sig.v;
@@ -289,14 +308,12 @@ export async function signOrder(
   }
   
   // Verify signature can be recovered
-  const recoveredAddress = ethers.verifyMessage(ethers.getBytes(hash), signature);
+  const recoveredAddress = ethers.verifyMessage(hashBytes, signature);
   console.log('Signature verification:', {
     signerAddress,
     recoveredAddress,
     match: signerAddress.toLowerCase() === recoveredAddress.toLowerCase(),
-    v,
-    r: sig.r,
-    s: sig.s,
+    finalV: v,
   });
   
   if (signerAddress.toLowerCase() !== recoveredAddress.toLowerCase()) {
@@ -535,6 +552,7 @@ export async function preTradeCheck(
 ): Promise<{ canTrade: boolean; reason?: string }> {
   const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
   
+  console.log('preTradeCheck - Contract address:', EXCHANGE_ADDRESS);
   console.log('preTradeCheck - Order details:', {
     tokenGet: order.tokenGet,
     amountGet: order.amountGet,
@@ -561,7 +579,22 @@ export async function preTradeCheck(
     // 2. Check available volume (also validates signature)
     let availableVolume;
     try {
-      console.log('Calling availableVolume...');
+      console.log('Calling availableVolume with params:', {
+        tokenGet: order.tokenGet,
+        amountGet: order.amountGet,
+        tokenGive: order.tokenGive,
+        amountGive: order.amountGive,
+        expires: order.expires,
+        nonce: order.nonce,
+        user: order.user,
+        v: order.v,
+        vType: typeof order.v,
+        r: order.r,
+        rLength: order.r?.length,
+        s: order.s,
+        sLength: order.s?.length,
+      });
+      
       availableVolume = await contract.availableVolume(
         order.tokenGet,
         order.amountGet,
