@@ -5,8 +5,9 @@ import { useMemo, useState } from 'react';
 import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { ethers } from 'ethers';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder, preTradeCheck } from '@/lib/exchange';
-import { Token } from '@/lib/tokens';
+import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder, preTradeCheck, EXCHANGE_ADDRESS } from '@/lib/exchange';
+import { Token, ZERO_ADDRESS } from '@/lib/tokens';
+import { recordTrade, updateOrderAfterTrade, deactivateOrderByHash } from '@/lib/supabase';
 import { ArrowDown, ArrowUp, BookOpen, Loader2 } from 'lucide-react';
 
 interface OrderBookProps {
@@ -15,7 +16,7 @@ interface OrderBookProps {
 }
 
 export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
-  const { buyOrders, sellOrders, isLoadingOrders, trades } = useTradingStore();
+  const { buyOrders, sellOrders, isLoadingOrders, trades, setOrders, addTrade } = useTradingStore();
   const { setSelectedPrice, setOrderTab } = useUIStore();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -151,8 +152,82 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       const tx = await executeTrade(signer, signedOrder, amountToTrade);
       console.log('Trade tx:', tx.hash);
       
-      await tx.wait();
-      console.log('Trade confirmed!');
+      const receipt = await tx.wait();
+      console.log('Trade confirmed!', receipt);
+
+      // Get block info for timestamp
+      const block = await provider.getBlock(receipt!.blockNumber);
+      const timestamp = block?.timestamp ? Number(block.timestamp) : Math.floor(Date.now() / 1000);
+
+      // Calculate trade details
+      const baseAmount = parseFloat(formatAmount(
+        isSellOrder ? order.amountGive : order.amountGet,
+        baseToken.decimals
+      ));
+      const quoteAmount = parseFloat(formatAmount(
+        isSellOrder ? order.amountGet : order.amountGive,
+        quoteToken.decimals
+      ));
+      const tradePrice = orderData.price;
+
+      // Record trade to Supabase
+      console.log('Recording trade to Supabase...');
+      const tradeResult = await recordTrade({
+        tx_hash: tx.hash,
+        log_index: 0,
+        token_get: order.tokenGet,
+        amount_get: order.amountGet,
+        token_give: order.tokenGive,
+        amount_give: order.amountGive,
+        maker: order.user,
+        taker: address!,
+        block_number: receipt!.blockNumber,
+        block_timestamp: new Date(timestamp * 1000).toISOString(),
+        base_token: baseToken.address,
+        quote_token: quoteToken.address,
+        side: isSellOrder ? 'buy' : 'sell', // Taker's perspective
+        price: tradePrice,
+        base_amount: baseAmount,
+        quote_amount: quoteAmount,
+      });
+
+      if (!tradeResult.success) {
+        console.error('Failed to record trade:', tradeResult.error);
+      }
+
+      // Update/deactivate the order in Supabase
+      console.log('Deactivating order in Supabase...');
+      if (order.hash) {
+        await deactivateOrderByHash(order.hash);
+      }
+
+      // Add trade to local state
+      addTrade({
+        txHash: tx.hash,
+        blockNumber: receipt!.blockNumber,
+        timestamp,
+        tokenGet: order.tokenGet,
+        amountGet: order.amountGet,
+        tokenGive: order.tokenGive,
+        amountGive: order.amountGive,
+        maker: order.user,
+        taker: address!,
+        price: tradePrice,
+        side: isSellOrder ? 'buy' : 'sell',
+        baseAmount,
+        quoteAmount,
+      });
+
+      // Remove order from local state
+      const updatedBuyOrders = buyOrders.filter(o => 
+        !(o.nonce === order.nonce && o.expires === order.expires && o.user === order.user)
+      );
+      const updatedSellOrders = sellOrders.filter(o => 
+        !(o.nonce === order.nonce && o.expires === order.expires && o.user === order.user)
+      );
+      setOrders(updatedBuyOrders, updatedSellOrders);
+      
+      console.log('Trade complete and order removed!');
       
     } catch (err: any) {
       console.error('Trade execution error:', err);
