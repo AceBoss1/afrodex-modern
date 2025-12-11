@@ -568,6 +568,11 @@ export async function testTrade(
 
 /**
  * Pre-trade validation - checks all conditions and returns reason if trade would fail
+ * 
+ * IMPORTANT: In EtherDelta/ForkDelta trade function:
+ * - The `amount` parameter is how much of `tokenGet` the taker SENDS to the maker
+ * - The taker RECEIVES proportional `tokenGive` from the maker
+ * - So taker needs balance of tokenGet >= amount
  */
 export async function preTradeCheck(
   provider: Provider,
@@ -591,6 +596,8 @@ export async function preTradeCheck(
     s: order.s,
     hash: order.hash,
   });
+  console.log('preTradeCheck - Trade amount:', amount);
+  console.log('preTradeCheck - Taker address:', takerAddress);
   
   try {
     // 0. Check for invalid order amounts (common bug!)
@@ -637,14 +644,12 @@ export async function preTradeCheck(
       }
       
       // Step 1: Recalculate the sha256 hash (same as contract)
-      // Contract: bytes32 hash = sha256(this, tokenGet, amountGet, tokenGive, amountGive, expires, nonce);
       const expectedHash = getOrderHash(order);
       console.log('Computed hash:', expectedHash);
       console.log('Stored hash:', order.hash);
       console.log('Hash match:', expectedHash === order.hash);
       
       // Step 2: Compute prefixed hash (same as contract)
-      // Contract: sha3("\x19Ethereum Signed Message:\n32", hash) where sha3 = keccak256
       const hashBytes = ethers.getBytes(expectedHash);
       const prefixedHash = ethers.keccak256(
         ethers.concat([
@@ -655,7 +660,6 @@ export async function preTradeCheck(
       console.log('Prefixed hash:', prefixedHash);
       
       // Step 3: Recover signer (same as contract's ecrecover)
-      // Contract: ecrecover(prefixedHash, v, r, s) == user
       try {
         const sigObj = ethers.Signature.from({ r: order.r, s: order.s, v: v });
         const recoveredAddress = ethers.recoverAddress(prefixedHash, sigObj);
@@ -712,8 +716,6 @@ export async function preTradeCheck(
       console.log('Stored hash:', order.hash);
       console.log('Hash match:', recalculatedHash === order.hash);
       
-      // Check if order was cancelled
-      // If volume is 0 but maker has balance, likely invalid signature
       return { 
         canTrade: false, 
         reason: `Invalid signature or order filled. Hash match: ${recalculatedHash === order.hash}. Delete and create new order.` 
@@ -725,26 +727,40 @@ export async function preTradeCheck(
       return { canTrade: false, reason: `Amount exceeds available (${amount} > ${availableVolume})` };
     }
 
-    // 3. Check taker's balance for tokenGet
-    const takerBalance = await contract.balanceOf(order.tokenGet, takerAddress);
-    // Calculate how much taker needs to pay
-    // For sell orders: tokenGet is ETH, taker pays ETH
-    // amount is the amount of tokenGet taker will receive from maker
-    // Taker needs to send proportional tokenGive
-    const amountGiveNeeded = (amountBigInt * BigInt(order.amountGive)) / BigInt(order.amountGet);
+    // 3. FIXED: Check taker's balance of tokenGet (what taker SENDS to maker)
+    // In EtherDelta trade:
+    // - `amount` is how much of tokenGet the taker sends to maker
+    // - Taker receives proportional tokenGive from maker
+    // So taker needs tokenGet balance >= amount
+    const takerBalanceTokenGet = await contract.balanceOf(order.tokenGet, takerAddress);
+    console.log('Taker balance of tokenGet:', takerBalanceTokenGet.toString());
+    console.log('Amount taker needs to send:', amount);
     
-    // Actually, for trade() function:
-    // - amount is how much of tokenGet taker wants
-    // - taker pays proportional tokenGive
-    const takerBalanceGive = await contract.balanceOf(order.tokenGive, takerAddress);
-    if (takerBalanceGive < amountGiveNeeded) {
+    if (BigInt(takerBalanceTokenGet) < amountBigInt) {
+      // Provide helpful error message based on token type
+      const tokenGetIsETH = order.tokenGet.toLowerCase() === ZERO_ADDRESS.toLowerCase();
+      const tokenName = tokenGetIsETH ? 'ETH' : 'tokens';
       return { 
         canTrade: false, 
-        reason: `Insufficient balance: need ${amountGiveNeeded.toString()} but have ${takerBalanceGive.toString()}` 
+        reason: `Insufficient ${tokenName} in exchange: need ${amount} but have ${takerBalanceTokenGet.toString()}. Deposit more ${tokenName} to the exchange first.` 
       };
     }
 
-    // 4. Final test with contract
+    // 4. Also verify maker has enough tokenGive to fulfill
+    const makerBalanceTokenGive = await contract.balanceOf(order.tokenGive, order.user);
+    // Calculate how much tokenGive maker needs to send for this trade amount
+    const tokenGiveNeeded = (amountBigInt * BigInt(order.amountGive)) / BigInt(order.amountGet);
+    console.log('Maker balance of tokenGive:', makerBalanceTokenGive.toString());
+    console.log('TokenGive needed from maker:', tokenGiveNeeded.toString());
+    
+    if (BigInt(makerBalanceTokenGive) < tokenGiveNeeded) {
+      return { 
+        canTrade: false, 
+        reason: `Maker has insufficient balance: needs ${tokenGiveNeeded.toString()} but has ${makerBalanceTokenGive.toString()}` 
+      };
+    }
+
+    // 5. Final test with contract
     const canTrade = await contract.testTrade(
       order.tokenGet,
       order.amountGet,
@@ -761,7 +777,7 @@ export async function preTradeCheck(
     );
 
     if (!canTrade) {
-      return { canTrade: false, reason: 'Contract testTrade returned false (check maker balance or signature)' };
+      return { canTrade: false, reason: 'Contract testTrade returned false (check balances or signature)' };
     }
 
     return { canTrade: true };
