@@ -1,289 +1,229 @@
 // components/MyTransactions.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
-import { ethers, Contract } from 'ethers';
-import { 
-  History, 
-  FileText, 
-  Wallet,
-  X,
-  Loader2,
-  ExternalLink,
-  AlertCircle,
-} from 'lucide-react';
-import { Token, ZERO_ADDRESS } from '@/lib/tokens';
-import { EXCHANGE_ADDRESS, formatAmount, formatDisplayAmount, cancelOrder as cancelOrderOnChain } from '@/lib/exchange';
-import { EXCHANGE_ABI } from '@/lib/abi';
+import { useState, useEffect, useMemo } from 'react';
+import { useAccount } from 'wagmi';
+import { ethers } from 'ethers';
 import { useTradingStore } from '@/lib/store';
-import { cancelOrderByHash, getSupabaseClient } from '@/lib/supabase';
+import { Token, ZERO_ADDRESS } from '@/lib/tokens';
+import { cancelOrderByHash, clearAllOrders, getTradesFromDb } from '@/lib/supabase';
+import { 
+  ClipboardList, 
+  ArrowLeftRight, 
+  Wallet, 
+  X, 
+  ExternalLink,
+  Trash2,
+  RefreshCw,
+  Loader2
+} from 'lucide-react';
+import { EXCHANGE_ADDRESS, ERC20_ABI, EXCHANGE_ABI } from '@/lib/exchange';
 
 interface MyTransactionsProps {
   baseToken: Token;
   quoteToken: Token;
 }
 
-interface UserOrder {
-  orderHash: string;
-  side: 'buy' | 'sell';
-  price: number;
-  amount: number;
-  total: number;
-  filled: number;
-  filledPercent: number;
-  expires: string;
-  nonce: string;
-  tokenGet: string;
-  amountGet: string;
-  tokenGive: string;
-  amountGive: string;
-  v?: number;
-  r?: string;
-  s?: string;
+type Tab = 'orders' | 'trades' | 'funds';
+
+// Format with up to 15 decimal places
+function formatPrecise15(value: string | number, decimals: number = 18): string {
+  try {
+    let numValue: number;
+    
+    if (typeof value === 'string') {
+      // Handle wei values
+      if (value.length > 15 || !value.includes('.')) {
+        const formatted = ethers.formatUnits(value, decimals);
+        numValue = parseFloat(formatted);
+      } else {
+        numValue = parseFloat(value);
+      }
+    } else {
+      numValue = value;
+    }
+    
+    if (isNaN(numValue) || !isFinite(numValue)) return '0';
+    if (numValue === 0) return '0';
+    
+    // For very small numbers, use fixed notation with up to 15 decimals
+    if (Math.abs(numValue) < 0.000001) {
+      return numValue.toFixed(15).replace(/\.?0+$/, '');
+    }
+    
+    // For larger numbers, use appropriate precision
+    if (Math.abs(numValue) >= 1) {
+      return numValue.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 8,
+      });
+    }
+    
+    // For numbers between 0.000001 and 1
+    return numValue.toFixed(15).replace(/\.?0+$/, '');
+  } catch {
+    return '0';
+  }
 }
 
-interface UserTrade {
-  txHash: string;
-  timestamp: number;
-  side: 'buy' | 'sell';
-  price: number;
-  amount: number;
-  total: number;
-  isMaker: boolean;
+// Format price with 15 decimals
+function formatPrice15(price: number): string {
+  if (price === 0) return '0';
+  if (isNaN(price) || !isFinite(price)) return '0';
+  
+  if (price < 0.000001) {
+    return price.toFixed(15).replace(/\.?0+$/, '');
+  }
+  
+  return price.toFixed(15).replace(/\.?0+$/, '');
 }
 
-interface FundMovement {
-  txHash: string;
-  timestamp: number;
-  type: 'deposit' | 'withdraw';
-  token: string;
-  amount: number;
-  balance: number;
+// Shorten address
+function shortenAddress(address: string): string {
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-type Tab = 'trades' | 'orders' | 'funds';
+// Format timestamp
+function formatTime(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export default function MyTransactions({ baseToken, quoteToken }: MyTransactionsProps) {
-  const { address, isConnected } = useAccount();
-  const publicClient = usePublicClient();
-  const { data: walletClient } = useWalletClient();
-  const { buyOrders, sellOrders } = useTradingStore();
-
   const [activeTab, setActiveTab] = useState<Tab>('orders');
-  const [userOrders, setUserOrders] = useState<UserOrder[]>([]);
-  const [userTrades, setUserTrades] = useState<UserTrade[]>([]);
-  const [fundMovements, setFundMovements] = useState<FundMovement[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { address, isConnected } = useAccount();
+  const { buyOrders, sellOrders, trades, setOrders, setTrades } = useTradingStore();
+  
+  const [balances, setBalances] = useState({
+    baseWallet: '0',
+    baseExchange: '0',
+    quoteWallet: '0',
+    quoteExchange: '0',
+  });
+  const [isLoadingBalances, setIsLoadingBalances] = useState(false);
   const [cancellingOrder, setCancellingOrder] = useState<string | null>(null);
+  const [isClearing, setIsClearing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Fetch user's orders from the orderbook
+  // Get user's orders
+  const myOrders = useMemo(() => {
+    if (!address) return [];
+    
+    const allOrders = [...buyOrders, ...sellOrders];
+    return allOrders
+      .filter(o => o.user?.toLowerCase() === address.toLowerCase())
+      .sort((a, b) => parseInt(b.expires) - parseInt(a.expires));
+  }, [buyOrders, sellOrders, address]);
+
+  // Get user's trades
+  const myTrades = useMemo(() => {
+    if (!address) return [];
+    
+    return trades
+      .filter(t => 
+        t.maker?.toLowerCase() === address.toLowerCase() ||
+        t.taker?.toLowerCase() === address.toLowerCase()
+      )
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }, [trades, address]);
+
+  // Fetch balances
   useEffect(() => {
-    if (!address) {
-      setUserOrders([]);
-      return;
-    }
-
-    const fetchUserOrders = async () => {
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-
+    const fetchBalances = async () => {
+      if (!address || !isConnected || typeof window === 'undefined') return;
+      
+      setIsLoadingBalances(true);
+      
       try {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('*')
-          .eq('user_address', address.toLowerCase())
-          .eq('base_token', baseToken.address.toLowerCase())
-          .eq('is_active', true)
-          .eq('is_cancelled', false)
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        const orders: UserOrder[] = (data || []).map((o: any) => ({
-          orderHash: o.order_hash || o.tx_hash,
-          side: o.side,
-          price: o.price,
-          amount: o.base_amount,
-          total: o.quote_amount,
-          filled: parseFloat(o.amount_filled) || 0,
-          filledPercent: o.base_amount > 0 
-            ? (parseFloat(o.amount_filled) / o.base_amount) * 100 
-            : 0,
-          expires: o.expires,
-          nonce: o.nonce,
-          tokenGet: o.token_get,
-          amountGet: o.amount_get,
-          tokenGive: o.token_give,
-          amountGive: o.amount_give,
-          v: o.v,
-          r: o.r,
-          s: o.s,
-        }));
-
-        setUserOrders(orders);
-      } catch (err) {
-        console.error('Error fetching user orders:', err);
-      }
-    };
-
-    fetchUserOrders();
-  }, [address, baseToken.address, buyOrders, sellOrders]);
-
-  // Fetch user's trades
-  useEffect(() => {
-    if (!address) {
-      setUserTrades([]);
-      return;
-    }
-
-    const fetchUserTrades = async () => {
-      const supabase = getSupabaseClient();
-      if (!supabase) return;
-
-      try {
-        const { data, error } = await supabase
-          .from('trades')
-          .select('*')
-          .eq('base_token', baseToken.address.toLowerCase())
-          .or(`maker.eq.${address.toLowerCase()},taker.eq.${address.toLowerCase()}`)
-          .order('block_number', { ascending: false })
-          .limit(50);
-
-        if (error) throw error;
-
-        const trades: UserTrade[] = (data || []).map((t: any) => ({
-          txHash: t.tx_hash,
-          timestamp: t.block_timestamp ? new Date(t.block_timestamp).getTime() / 1000 : Date.now() / 1000,
-          side: t.side,
-          price: t.price,
-          amount: t.base_amount,
-          total: t.quote_amount,
-          isMaker: t.maker.toLowerCase() === address.toLowerCase(),
-        }));
-
-        setUserTrades(trades);
-      } catch (err) {
-        console.error('Error fetching user trades:', err);
-      }
-    };
-
-    fetchUserTrades();
-  }, [address, baseToken.address]);
-
-  // Fetch fund movements (deposits/withdrawals)
-  useEffect(() => {
-    if (!address || !publicClient) {
-      setFundMovements([]);
-      return;
-    }
-
-    const fetchFundMovements = async () => {
-      setLoading(true);
-      try {
-        const provider = new ethers.BrowserProvider(publicClient as any);
-        const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const exchangeContract = new ethers.Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
         
-        const currentBlock = await provider.getBlockNumber();
-        const fromBlock = Math.max(0, currentBlock - 50000);
-
-        // Fetch Deposit events
-        const depositFilter = contract.filters.Deposit(baseToken.address, address);
-        const depositEvents = await contract.queryFilter(depositFilter, fromBlock, 'latest');
-
-        // Fetch Withdraw events  
-        const withdrawFilter = contract.filters.Withdraw(baseToken.address, address);
-        const withdrawEvents = await contract.queryFilter(withdrawFilter, fromBlock, 'latest');
-
-        const movements: FundMovement[] = [];
-
-        for (const event of depositEvents) {
-          const log = event as any;
-          if (log.args) {
-            const block = await provider.getBlock(event.blockNumber);
-            movements.push({
-              txHash: event.transactionHash,
-              timestamp: block?.timestamp ? Number(block.timestamp) : Date.now() / 1000,
-              type: 'deposit',
-              token: baseToken.symbol,
-              amount: parseFloat(formatAmount(log.args[2].toString(), baseToken.decimals)),
-              balance: parseFloat(formatAmount(log.args[3].toString(), baseToken.decimals)),
-            });
-          }
+        // Fetch ETH balances
+        const ethWallet = await provider.getBalance(address);
+        const ethExchange = await exchangeContract.balanceOf(ZERO_ADDRESS, address);
+        
+        // Fetch token balances
+        let tokenWallet = BigInt(0);
+        let tokenExchange = BigInt(0);
+        
+        if (baseToken.address !== ZERO_ADDRESS) {
+          const tokenContract = new ethers.Contract(baseToken.address, ERC20_ABI, provider);
+          tokenWallet = await tokenContract.balanceOf(address);
+          tokenExchange = await exchangeContract.balanceOf(baseToken.address, address);
         }
-
-        for (const event of withdrawEvents) {
-          const log = event as any;
-          if (log.args) {
-            const block = await provider.getBlock(event.blockNumber);
-            movements.push({
-              txHash: event.transactionHash,
-              timestamp: block?.timestamp ? Number(block.timestamp) : Date.now() / 1000,
-              type: 'withdraw',
-              token: baseToken.symbol,
-              amount: parseFloat(formatAmount(log.args[2].toString(), baseToken.decimals)),
-              balance: parseFloat(formatAmount(log.args[3].toString(), baseToken.decimals)),
-            });
-          }
-        }
-
-        // Sort by timestamp descending
-        movements.sort((a, b) => b.timestamp - a.timestamp);
-        setFundMovements(movements);
+        
+        setBalances({
+          baseWallet: tokenWallet.toString(),
+          baseExchange: tokenExchange.toString(),
+          quoteWallet: ethWallet.toString(),
+          quoteExchange: ethExchange.toString(),
+        });
       } catch (err) {
-        console.error('Error fetching fund movements:', err);
+        console.error('Error fetching balances:', err);
       } finally {
-        setLoading(false);
+        setIsLoadingBalances(false);
       }
     };
 
-    if (activeTab === 'funds') {
-      fetchFundMovements();
-    }
-  }, [address, baseToken, publicClient, activeTab]);
+    fetchBalances();
+    
+    // Refresh balances every 15 seconds
+    const interval = setInterval(fetchBalances, 15000);
+    return () => clearInterval(interval);
+  }, [address, isConnected, baseToken.address]);
+
+  // Fetch trades from Supabase on mount
+  useEffect(() => {
+    const fetchTrades = async () => {
+      const dbTrades = await getTradesFromDb(baseToken.address, quoteToken.address, 100);
+      
+      if (dbTrades.length > 0) {
+        const formattedTrades = dbTrades.map(t => ({
+          txHash: t.tx_hash,
+          blockNumber: t.block_number,
+          timestamp: t.block_timestamp ? Math.floor(new Date(t.block_timestamp).getTime() / 1000) : 0,
+          tokenGet: t.token_get,
+          amountGet: t.amount_get,
+          tokenGive: t.token_give,
+          amountGive: t.amount_give,
+          maker: t.maker,
+          taker: t.taker,
+          price: t.price,
+          side: t.side as 'buy' | 'sell',
+          baseAmount: t.base_amount,
+          quoteAmount: t.quote_amount,
+        }));
+        
+        setTrades(formattedTrades);
+      }
+    };
+
+    fetchTrades();
+  }, [baseToken.address, quoteToken.address, setTrades]);
 
   // Cancel order
-  const handleCancelOrder = async (order: UserOrder) => {
-    if (!walletClient || !order.v || !order.r || !order.s) {
-      // Off-chain cancel only (no signature on-chain)
-      setCancellingOrder(order.orderHash);
-      try {
-        await cancelOrderByHash(order.orderHash);
-        setUserOrders(prev => prev.filter(o => o.orderHash !== order.orderHash));
-      } catch (err) {
-        console.error('Error cancelling order:', err);
-      } finally {
-        setCancellingOrder(null);
-      }
+  const handleCancelOrder = async (order: typeof myOrders[0]) => {
+    if (!order.hash) {
+      console.error('No order hash for cancellation');
       return;
     }
 
-    setCancellingOrder(order.orderHash);
+    setCancellingOrder(order.hash);
+    
     try {
-      const provider = new ethers.BrowserProvider(walletClient as any);
-      const signer = await provider.getSigner();
-
-      // Cancel on-chain
-      const tx = await cancelOrderOnChain(signer, {
-        tokenGet: order.tokenGet,
-        amountGet: order.amountGet,
-        tokenGive: order.tokenGive,
-        amountGive: order.amountGive,
-        expires: order.expires,
-        nonce: order.nonce,
-        user: address!,
-        v: order.v,
-        r: order.r,
-        s: order.s,
-        hash: order.orderHash, // Add the required hash property
-      });
-
-      await tx.wait();
-
-      // Also cancel in Supabase
-      await cancelOrderByHash(order.orderHash);
+      const success = await cancelOrderByHash(order.hash);
       
-      setUserOrders(prev => prev.filter(o => o.orderHash !== order.orderHash));
+      if (success) {
+        // Remove from local state
+        const updatedBuys = buyOrders.filter(o => o.hash !== order.hash);
+        const updatedSells = sellOrders.filter(o => o.hash !== order.hash);
+        setOrders(updatedBuys, updatedSells);
+      }
     } catch (err) {
       console.error('Error cancelling order:', err);
     } finally {
@@ -291,242 +231,318 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
     }
   };
 
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  // Clear all orders
+  const handleClearAll = async () => {
+    if (!confirm('Clear all your active orders?')) return;
+    
+    setIsClearing(true);
+    
+    try {
+      await clearAllOrders();
+      setOrders([], []);
+    } catch (err) {
+      console.error('Error clearing orders:', err);
+    } finally {
+      setIsClearing(false);
+    }
   };
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'orders', label: 'Orders', icon: <FileText className="w-3 h-3" /> },
-    { id: 'trades', label: 'Trades', icon: <History className="w-3 h-3" /> },
-    { id: 'funds', label: 'Funds', icon: <Wallet className="w-3 h-3" /> },
+  // Refresh trades from Supabase
+  const handleRefreshTrades = async () => {
+    setIsRefreshing(true);
+    
+    try {
+      const dbTrades = await getTradesFromDb(baseToken.address, quoteToken.address, 100);
+      
+      if (dbTrades.length > 0) {
+        const formattedTrades = dbTrades.map(t => ({
+          txHash: t.tx_hash,
+          blockNumber: t.block_number,
+          timestamp: t.block_timestamp ? Math.floor(new Date(t.block_timestamp).getTime() / 1000) : 0,
+          tokenGet: t.token_get,
+          amountGet: t.amount_get,
+          tokenGive: t.token_give,
+          amountGive: t.amount_give,
+          maker: t.maker,
+          taker: t.taker,
+          price: t.price,
+          side: t.side as 'buy' | 'sell',
+          baseAmount: t.base_amount,
+          quoteAmount: t.quote_amount,
+        }));
+        
+        setTrades(formattedTrades);
+      }
+    } catch (err) {
+      console.error('Error refreshing trades:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const tabs = [
+    { id: 'orders' as Tab, label: 'Orders', icon: ClipboardList, count: myOrders.length },
+    { id: 'trades' as Tab, label: 'Trades', icon: ArrowLeftRight, count: myTrades.length },
+    { id: 'funds' as Tab, label: 'Funds', icon: Wallet },
   ];
 
   if (!isConnected) {
     return (
-      <div className="card">
-        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <History className="w-4 h-4 text-afrodex-orange" />
-          My Transactions
-        </h3>
-        <div className="text-center py-6 text-gray-500 text-sm">
-          Connect wallet to view your transactions
-        </div>
+      <div className="card h-full flex items-center justify-center">
+        <p className="text-gray-500 text-sm">Connect wallet to view transactions</p>
       </div>
     );
   }
 
   return (
-    <div className="card">
-      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-        <History className="w-4 h-4 text-afrodex-orange" />
-        My Transactions
-      </h3>
-
+    <div className="card h-full flex flex-col">
       {/* Tabs */}
-      <div className="flex gap-1 mb-3 p-1 bg-afrodex-black-lighter rounded-lg">
+      <div className="flex border-b border-white/10 mb-4">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-1 ${
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors relative ${
               activeTab === tab.id
-                ? 'bg-afrodex-orange text-white'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                ? 'text-afrodex-orange'
+                : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {tab.icon}
+            <tab.icon className="w-4 h-4" />
             {tab.label}
+            {tab.count !== undefined && tab.count > 0 && (
+              <span className="bg-afrodex-orange/20 text-afrodex-orange text-xs px-1.5 rounded">
+                {tab.count}
+              </span>
+            )}
+            {activeTab === tab.id && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-afrodex-orange" />
+            )}
           </button>
         ))}
       </div>
 
-      {/* Content - No internal scroll, flows naturally */}
-      <div>
+      {/* Tab Content */}
+      <div className="flex-1 overflow-y-auto min-h-0">
         {/* Orders Tab */}
         {activeTab === 'orders' && (
-          <>
-            {/* Clear All Orders Button - shown when there are orders */}
-            {userOrders.length > 0 && (
-              <div className="mb-2 p-2 bg-yellow-900/20 border border-yellow-600/30 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs text-yellow-400">
-                    <AlertCircle className="w-3 h-3" />
-                    <span>If trades fail, clear old orders and recreate</span>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      if (confirm('Delete all your orders? You will need to recreate them.')) {
-                        const supabase = getSupabaseClient();
-                        if (supabase && address) {
-                          await supabase
-                            .from('orders')
-                            .delete()
-                            .eq('user_address', address.toLowerCase());
-                          setUserOrders([]);
-                        }
-                      }
-                    }}
-                    className="text-xs px-2 py-1 bg-yellow-600/30 hover:bg-yellow-600/50 rounded text-yellow-400 transition-colors"
-                  >
-                    Clear All
-                  </button>
-                </div>
+          <div>
+            {/* Actions */}
+            {myOrders.length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={handleClearAll}
+                  disabled={isClearing}
+                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+                >
+                  {isClearing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  Clear All
+                </button>
               </div>
             )}
-            {userOrders.length === 0 ? (
-              <div className="text-center py-6 text-gray-500 text-xs">
+            
+            {myOrders.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-sm">
                 No open orders
               </div>
             ) : (
               <div className="space-y-2">
-                {userOrders.map((order) => (
-                  <div
-                    key={order.orderHash}
-                    className="p-2 bg-afrodex-black-lighter rounded-lg"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={`text-xs font-semibold ${
-                        order.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
-                      }`}>
-                        {order.side.toUpperCase()} {baseToken.symbol}
-                      </span>
-                      <button
-                        onClick={() => handleCancelOrder(order)}
-                        disabled={cancellingOrder === order.orderHash}
-                        className="p-1 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors"
-                        title="Cancel order"
-                      >
-                        {cancellingOrder === order.orderHash ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <X className="w-3 h-3" />
-                        )}
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div>
-                        <span className="text-gray-500">Price:</span>
-                        <span className="ml-1 font-mono">{order.price.toFixed(12)}</span>
+                {myOrders.map((order, idx) => {
+                  const isBuy = order.tokenGet?.toLowerCase() === baseToken.address.toLowerCase();
+                  const amount = isBuy
+                    ? formatPrecise15(order.amountGet, baseToken.decimals)
+                    : formatPrecise15(order.amountGive, baseToken.decimals);
+                  const filled = formatPrecise15(order.amountFilled || '0', baseToken.decimals);
+                  const isCancelling = cancellingOrder === order.hash;
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className="bg-afrodex-black-lighter rounded-lg p-3 border border-white/5"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                          isBuy ? 'bg-trade-buy/20 text-trade-buy' : 'bg-trade-sell/20 text-trade-sell'
+                        }`}>
+                          {isBuy ? 'BUY' : 'SELL'}
+                        </span>
+                        <button
+                          onClick={() => handleCancelOrder(order)}
+                          disabled={isCancelling}
+                          className="text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                        >
+                          {isCancelling ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <X className="w-4 h-4" />
+                          )}
+                        </button>
                       </div>
-                      <div>
-                        <span className="text-gray-500">Amount:</span>
-                        <span className="ml-1 font-mono">{formatDisplayAmount(order.amount)}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Total:</span>
-                        <span className="ml-1 font-mono">{order.total.toFixed(6)} ETH</span>
-                      </div>
-                    </div>
-                    {/* Fill meter */}
-                    <div className="mt-2">
-                      <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
-                        <span>Filled</span>
-                        <span>{order.filledPercent.toFixed(1)}%</span>
-                      </div>
-                      <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full ${order.side === 'buy' ? 'bg-trade-buy' : 'bg-trade-sell'}`}
-                          style={{ width: `${order.filledPercent}%` }}
-                        />
+                      
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-500">Price</span>
+                          <p className="font-mono text-white">{formatPrice15(order.price || 0)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Amount</span>
+                          <p className="font-mono text-white">{amount}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Filled</span>
+                          <p className="font-mono text-gray-400">{filled}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* Trades Tab */}
         {activeTab === 'trades' && (
-          <>
-            {userTrades.length === 0 ? (
-              <div className="text-center py-6 text-gray-500 text-xs">
+          <div>
+            {/* Refresh button */}
+            <div className="flex justify-end mb-2">
+              <button
+                onClick={handleRefreshTrades}
+                disabled={isRefreshing}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-300 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+            
+            {myTrades.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-sm">
                 No trade history
               </div>
             ) : (
-              <div className="space-y-1">
-                {userTrades.map((trade, i) => (
-                  <div
-                    key={`${trade.txHash}-${i}`}
-                    className="flex items-center justify-between p-2 bg-afrodex-black-lighter rounded text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`font-semibold ${
-                        trade.side === 'buy' ? 'text-trade-buy' : 'text-trade-sell'
-                      }`}>
-                        {trade.side.toUpperCase()}
-                      </span>
-                      <span className="text-gray-500">{formatTime(trade.timestamp)}</span>
+              <div className="space-y-2">
+                {myTrades.map((trade, idx) => {
+                  const isMaker = trade.maker?.toLowerCase() === address?.toLowerCase();
+                  const isBuy = trade.side === 'buy';
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className="bg-afrodex-black-lighter rounded-lg p-3 border border-white/5"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                            isBuy ? 'bg-trade-buy/20 text-trade-buy' : 'bg-trade-sell/20 text-trade-sell'
+                          }`}>
+                            {isBuy ? 'BUY' : 'SELL'}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {isMaker ? 'Maker' : 'Taker'}
+                          </span>
+                        </div>
+                        <a
+                          href={`https://etherscan.io/tx/${trade.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-gray-500 hover:text-afrodex-orange"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-500">Price</span>
+                          <p className="font-mono text-white">{formatPrice15(trade.price || 0)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Amount</span>
+                          <p className="font-mono text-white">{formatPrecise15(trade.baseAmount || 0, 0)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Total</span>
+                          <p className="font-mono text-gray-400">{formatPrecise15(trade.quoteAmount || 0, 0)} ETH</p>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-2 text-xs text-gray-600">
+                        {trade.timestamp ? formatTime(trade.timestamp) : 'Unknown time'}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono">{formatDisplayAmount(trade.amount)} {baseToken.symbol}</span>
-                      <span className="text-gray-500">@</span>
-                      <span className="font-mono">{trade.price.toFixed(10)}</span>
-                      <a
-                        href={`https://etherscan.io/tx/${trade.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-afrodex-orange hover:text-afrodex-orange-light"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* Funds Tab */}
         {activeTab === 'funds' && (
-          <>
-            {loading ? (
-              <div className="text-center py-6">
-                <Loader2 className="w-5 h-5 animate-spin mx-auto text-afrodex-orange" />
-              </div>
-            ) : fundMovements.length === 0 ? (
-              <div className="text-center py-6 text-gray-500 text-xs">
-                No deposit/withdraw history
+          <div className="space-y-4">
+            {isLoadingBalances ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto text-afrodex-orange" />
+                <p className="text-gray-500 text-sm mt-2">Loading balances...</p>
               </div>
             ) : (
-              <div className="space-y-1">
-                {fundMovements.map((movement, i) => (
-                  <div
-                    key={`${movement.txHash}-${i}`}
-                    className="flex items-center justify-between p-2 bg-afrodex-black-lighter rounded text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`font-semibold ${
-                        movement.type === 'deposit' ? 'text-trade-buy' : 'text-trade-sell'
-                      }`}>
-                        {movement.type.toUpperCase()}
-                      </span>
-                      <span className="text-gray-500">{formatTime(movement.timestamp)}</span>
+              <>
+                {/* ETH Balances */}
+                <div className="bg-afrodex-black-lighter rounded-lg p-4 border border-white/5">
+                  <h4 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center text-xs">Ξ</div>
+                    {quoteToken.symbol}
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-xs text-gray-500">Wallet</span>
+                      <p className="font-mono text-white text-sm">
+                        {formatPrecise15(balances.quoteWallet, 18)}
+                      </p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono">{formatDisplayAmount(movement.amount)} {movement.token}</span>
-                      <a
-                        href={`https://etherscan.io/tx/${movement.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-afrodex-orange hover:text-afrodex-orange-light"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                    <div>
+                      <span className="text-xs text-gray-500">Exchange</span>
+                      <p className="font-mono text-afrodex-orange text-sm">
+                        {formatPrecise15(balances.quoteExchange, 18)}
+                      </p>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {/* Token Balances */}
+                <div className="bg-afrodex-black-lighter rounded-lg p-4 border border-white/5">
+                  <h4 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-afrodex-orange/20 flex items-center justify-center text-xs">
+                      {baseToken.symbol.charAt(0)}
+                    </div>
+                    {baseToken.symbol}
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-xs text-gray-500">Wallet</span>
+                      <p className="font-mono text-white text-sm">
+                        {formatPrecise15(balances.baseWallet, baseToken.decimals)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500">Exchange</span>
+                      <p className="font-mono text-afrodex-orange text-sm">
+                        {formatPrecise15(balances.baseExchange, baseToken.decimals)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Help text */}
+                <p className="text-xs text-gray-600 text-center">
+                  Deposit funds to exchange to place orders. 
+                  <br />
+                  Use the Deposit/Withdraw panel.
+                </p>
+              </>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
