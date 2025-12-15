@@ -26,14 +26,14 @@ interface MyTransactionsProps {
 
 type Tab = 'orders' | 'trades' | 'funds';
 
-// Format with up to 15 decimal places
-function formatPrecise15(value: string | number, decimals: number = 18): string {
+// Format with full 15 decimal precision
+function formatFull15(value: string | number, decimals: number = 18): string {
   try {
     let numValue: number;
     
     if (typeof value === 'string') {
-      // Handle wei values
-      if (value.length > 15 || !value.includes('.')) {
+      // Handle wei values (large integer strings)
+      if (value.length > 15 && !value.includes('.')) {
         const formatted = ethers.formatUnits(value, decimals);
         numValue = parseFloat(formatted);
       } else {
@@ -46,41 +46,37 @@ function formatPrecise15(value: string | number, decimals: number = 18): string 
     if (isNaN(numValue) || !isFinite(numValue)) return '0';
     if (numValue === 0) return '0';
     
-    // For very small numbers, use fixed notation with up to 15 decimals
+    // For very small numbers, show full precision
     if (Math.abs(numValue) < 0.000001) {
       return numValue.toFixed(15).replace(/\.?0+$/, '');
     }
     
-    // For larger numbers, use appropriate precision
-    if (Math.abs(numValue) >= 1) {
-      return numValue.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 8,
-      });
+    // For small numbers, show up to 15 decimals
+    if (Math.abs(numValue) < 1) {
+      return numValue.toFixed(15).replace(/\.?0+$/, '');
     }
     
-    // For numbers between 0.000001 and 1
-    return numValue.toFixed(15).replace(/\.?0+$/, '');
+    // For larger numbers, use locale formatting with good precision
+    return numValue.toLocaleString('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 8,
+    });
   } catch {
     return '0';
   }
 }
 
-// Format price with 15 decimals
+// Format price with 15 decimals - never abbreviate
 function formatPrice15(price: number): string {
   if (price === 0) return '0';
   if (isNaN(price) || !isFinite(price)) return '0';
   
-  if (price < 0.000001) {
+  // Always show full precision for prices
+  if (Math.abs(price) < 0.000001) {
     return price.toFixed(15).replace(/\.?0+$/, '');
   }
   
   return price.toFixed(15).replace(/\.?0+$/, '');
-}
-
-// Shorten address
-function shortenAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 // Format timestamp
@@ -171,8 +167,6 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
     };
 
     fetchBalances();
-    
-    // Refresh balances every 15 seconds
     const interval = setInterval(fetchBalances, 15000);
     return () => clearInterval(interval);
   }, [address, isConnected, baseToken.address]);
@@ -180,7 +174,10 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
   // Fetch trades from Supabase on mount
   useEffect(() => {
     const fetchTrades = async () => {
+      console.log('Fetching trades from Supabase...');
       const dbTrades = await getTradesFromDb(baseToken.address, quoteToken.address, 100);
+      
+      console.log('Fetched trades:', dbTrades.length);
       
       if (dbTrades.length > 0) {
         const formattedTrades = dbTrades.map(t => ({
@@ -208,20 +205,20 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
 
   // Cancel order
   const handleCancelOrder = async (order: typeof myOrders[0]) => {
-    if (!order.hash) {
+    const orderHash = order.hash;
+    if (!orderHash) {
       console.error('No order hash for cancellation');
       return;
     }
 
-    setCancellingOrder(order.hash);
+    setCancellingOrder(orderHash);
     
     try {
-      const success = await cancelOrderByHash(order.hash);
+      const success = await cancelOrderByHash(orderHash);
       
       if (success) {
-        // Remove from local state
-        const updatedBuys = buyOrders.filter(o => o.hash !== order.hash);
-        const updatedSells = sellOrders.filter(o => o.hash !== order.hash);
+        const updatedBuys = buyOrders.filter(o => o.hash !== orderHash);
+        const updatedSells = sellOrders.filter(o => o.hash !== orderHash);
         setOrders(updatedBuys, updatedSells);
       }
     } catch (err) {
@@ -252,7 +249,10 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
     setIsRefreshing(true);
     
     try {
+      console.log('Refreshing trades...');
       const dbTrades = await getTradesFromDb(baseToken.address, quoteToken.address, 100);
+      
+      console.log('Refreshed trades:', dbTrades.length);
       
       if (dbTrades.length > 0) {
         const formattedTrades = dbTrades.map(t => ({
@@ -327,7 +327,6 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
         {/* Orders Tab */}
         {activeTab === 'orders' && (
           <div>
-            {/* Actions */}
             {myOrders.length > 0 && (
               <div className="flex justify-end mb-2">
                 <button
@@ -350,9 +349,9 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
                 {myOrders.map((order, idx) => {
                   const isBuy = order.tokenGet?.toLowerCase() === baseToken.address.toLowerCase();
                   const amount = isBuy
-                    ? formatPrecise15(order.amountGet, baseToken.decimals)
-                    : formatPrecise15(order.amountGive, baseToken.decimals);
-                  const filled = formatPrecise15(order.amountFilled || '0', baseToken.decimals);
+                    ? formatFull15(order.amountGet, baseToken.decimals)
+                    : formatFull15(order.amountGive, baseToken.decimals);
+                  const filled = formatFull15(order.amountFilled || '0', baseToken.decimals);
                   const isCancelling = cancellingOrder === order.hash;
                   
                   return (
@@ -382,15 +381,15 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
                           <span className="text-gray-500">Price</span>
-                          <p className="font-mono text-white">{formatPrice15(order.price || 0)}</p>
+                          <p className="font-mono text-white break-all">{formatPrice15(order.price || 0)}</p>
                         </div>
                         <div>
                           <span className="text-gray-500">Amount</span>
-                          <p className="font-mono text-white">{amount}</p>
+                          <p className="font-mono text-white break-all">{amount}</p>
                         </div>
                         <div>
                           <span className="text-gray-500">Filled</span>
-                          <p className="font-mono text-gray-400">{filled}</p>
+                          <p className="font-mono text-gray-400 break-all">{filled}</p>
                         </div>
                       </div>
                     </div>
@@ -404,7 +403,6 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
         {/* Trades Tab */}
         {activeTab === 'trades' && (
           <div>
-            {/* Refresh button */}
             <div className="flex justify-end mb-2">
               <button
                 onClick={handleRefreshTrades}
@@ -455,15 +453,15 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
                           <span className="text-gray-500">Price</span>
-                          <p className="font-mono text-white">{formatPrice15(trade.price || 0)}</p>
+                          <p className="font-mono text-white break-all">{formatPrice15(trade.price || 0)}</p>
                         </div>
                         <div>
                           <span className="text-gray-500">Amount</span>
-                          <p className="font-mono text-white">{formatPrecise15(trade.baseAmount || 0, 0)}</p>
+                          <p className="font-mono text-white break-all">{formatFull15(trade.baseAmount || 0, 0)}</p>
                         </div>
                         <div>
                           <span className="text-gray-500">Total</span>
-                          <p className="font-mono text-gray-400">{formatPrecise15(trade.quoteAmount || 0, 0)} ETH</p>
+                          <p className="font-mono text-gray-400 break-all">{formatFull15(trade.quoteAmount || 0, 0)} ETH</p>
                         </div>
                       </div>
                       
@@ -497,14 +495,14 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-xs text-gray-500">Wallet</span>
-                      <p className="font-mono text-white text-sm">
-                        {formatPrecise15(balances.quoteWallet, 18)}
+                      <p className="font-mono text-white text-sm break-all">
+                        {formatFull15(balances.quoteWallet, 18)}
                       </p>
                     </div>
                     <div>
                       <span className="text-xs text-gray-500">Exchange</span>
-                      <p className="font-mono text-afrodex-orange text-sm">
-                        {formatPrecise15(balances.quoteExchange, 18)}
+                      <p className="font-mono text-afrodex-orange text-sm break-all">
+                        {formatFull15(balances.quoteExchange, 18)}
                       </p>
                     </div>
                   </div>
@@ -521,24 +519,21 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-xs text-gray-500">Wallet</span>
-                      <p className="font-mono text-white text-sm">
-                        {formatPrecise15(balances.baseWallet, baseToken.decimals)}
+                      <p className="font-mono text-white text-sm break-all">
+                        {formatFull15(balances.baseWallet, baseToken.decimals)}
                       </p>
                     </div>
                     <div>
                       <span className="text-xs text-gray-500">Exchange</span>
-                      <p className="font-mono text-afrodex-orange text-sm">
-                        {formatPrecise15(balances.baseExchange, baseToken.decimals)}
+                      <p className="font-mono text-afrodex-orange text-sm break-all">
+                        {formatFull15(balances.baseExchange, baseToken.decimals)}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Help text */}
                 <p className="text-xs text-gray-600 text-center">
-                  Deposit funds to exchange to place orders. 
-                  <br />
-                  Use the Deposit/Withdraw panel.
+                  Deposit funds to exchange to place orders.
                 </p>
               </>
             )}
