@@ -2,12 +2,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
+import { useAccount, useWalletClient } from 'wagmi';
 import { ethers } from 'ethers';
 import { useTradingStore, useUIStore } from '@/lib/store';
-import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder, preTradeCheck, EXCHANGE_ADDRESS } from '@/lib/exchange';
-import { Token, ZERO_ADDRESS } from '@/lib/tokens';
-import { recordTrade, updateOrderAfterTrade, deactivateOrderByHash } from '@/lib/supabase';
+import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder, preTradeCheck } from '@/lib/exchange';
+import { Token } from '@/lib/tokens';
+import { recordTrade, deactivateOrderByHash } from '@/lib/supabase';
 import { ArrowDown, ArrowUp, BookOpen, Loader2 } from 'lucide-react';
 
 interface OrderBookProps {
@@ -20,14 +20,12 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const { setSelectedPrice, setOrderTab } = useUIStore();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const publicClient = usePublicClient();
   
   const [executingOrder, setExecutingOrder] = useState<string | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
 
   // Process orders for display
   const processedOrders = useMemo(() => {
-    // Calculate max total for depth visualization
     const allTotals = [
       ...buyOrders.map(o => parseFloat(formatAmount(o.amountGet, baseToken.decimals)) * (o.price || 0)),
       ...sellOrders.map(o => parseFloat(formatAmount(o.amountGive, baseToken.decimals)) * (o.price || 0)),
@@ -74,16 +72,12 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const handleOrderClick = async (orderData: typeof processedOrders.buys[0], isSellOrder: boolean) => {
     const order = orderData.order;
     
-    console.log('Order clicked:', {
-      price: orderData.price,
-      amount: orderData.amount,
-      side: isSellOrder ? 'sell' : 'buy',
-      hasSignature: !!(order.v && order.r && order.s),
-      v: order.v,
-      user: order.user,
-    });
+    console.log('=== ORDER CLICK ===');
+    console.log('Order:', order);
+    console.log('isSellOrder:', isSellOrder);
+    console.log('Order hash:', order.hash);
     
-    // If order doesn't have signature, just set price (legacy behavior)
+    // If order doesn't have signature, just set price
     if (!order.v || !order.r || !order.s) {
       console.log('No signature found - just setting price');
       setSelectedPrice(orderData.price.toString());
@@ -110,7 +104,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       return;
     }
 
-    const orderKey = `${order.nonce}-${order.expires}`;
+    const orderKey = order.hash || `${order.nonce}-${order.expires}`;
     setExecutingOrder(orderKey);
     setExecuteError(null);
 
@@ -135,7 +129,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       // Execute full amount available
       const amountToTrade = order.availableVolume || order.amountGet;
       
-      // Pre-trade check to identify issues before sending transaction
+      // Pre-trade check
       console.log('Running pre-trade check...');
       const preCheck = await preTradeCheck(provider, signedOrder, amountToTrade, address!);
       
@@ -147,7 +141,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         return;
       }
       
-      console.log('Pre-trade check passed, executing trade:', { signedOrder, amountToTrade });
+      console.log('Pre-trade check passed, executing trade...');
       
       const tx = await executeTrade(signer, signedOrder, amountToTrade);
       console.log('Trade tx:', tx.hash);
@@ -171,34 +165,48 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       const tradePrice = orderData.price;
 
       // Record trade to Supabase
-      console.log('Recording trade to Supabase...');
-      const tradeResult = await recordTrade({
-        tx_hash: tx.hash,
-        log_index: 0,
-        token_get: order.tokenGet,
-        amount_get: order.amountGet,
-        token_give: order.tokenGive,
-        amount_give: order.amountGive,
-        maker: order.user,
-        taker: address!,
-        block_number: receipt!.blockNumber,
-        block_timestamp: new Date(timestamp * 1000).toISOString(),
-        base_token: baseToken.address,
-        quote_token: quoteToken.address,
-        side: isSellOrder ? 'buy' : 'sell', // Taker's perspective
-        price: tradePrice,
-        base_amount: baseAmount,
-        quote_amount: quoteAmount,
-      });
+      console.log('=== RECORDING TRADE ===');
+      try {
+        const tradeResult = await recordTrade({
+          tx_hash: tx.hash,
+          log_index: 0,
+          token_get: order.tokenGet,
+          amount_get: order.amountGet,
+          token_give: order.tokenGive,
+          amount_give: order.amountGive,
+          maker: order.user,
+          taker: address!,
+          block_number: receipt!.blockNumber,
+          block_timestamp: new Date(timestamp * 1000).toISOString(),
+          base_token: baseToken.address,
+          quote_token: quoteToken.address,
+          side: isSellOrder ? 'buy' : 'sell',
+          price: tradePrice,
+          base_amount: baseAmount,
+          quote_amount: quoteAmount,
+        });
 
-      if (!tradeResult.success) {
-        console.error('Failed to record trade:', tradeResult.error);
+        if (!tradeResult.success) {
+          console.error('Failed to record trade to Supabase:', tradeResult.error);
+        } else {
+          console.log('Trade recorded to Supabase successfully!');
+        }
+      } catch (recordErr) {
+        console.error('Exception recording trade:', recordErr);
       }
 
-      // Update/deactivate the order in Supabase
-      console.log('Deactivating order in Supabase...');
-      if (order.hash) {
-        await deactivateOrderByHash(order.hash);
+      // Deactivate the order in Supabase
+      console.log('=== DEACTIVATING ORDER ===');
+      const orderHashToDeactivate = order.hash || signedOrder.hash;
+      console.log('Order hash to deactivate:', orderHashToDeactivate);
+      
+      if (orderHashToDeactivate) {
+        try {
+          const deactivated = await deactivateOrderByHash(orderHashToDeactivate);
+          console.log('Order deactivation result:', deactivated);
+        } catch (deactivateErr) {
+          console.error('Exception deactivating order:', deactivateErr);
+        }
       }
 
       // Add trade to local state
@@ -218,16 +226,28 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         quoteAmount,
       });
 
-      // Remove order from local state
-      const updatedBuyOrders = buyOrders.filter(o => 
-        !(o.nonce === order.nonce && o.expires === order.expires && o.user === order.user)
-      );
-      const updatedSellOrders = sellOrders.filter(o => 
-        !(o.nonce === order.nonce && o.expires === order.expires && o.user === order.user)
-      );
+      // Remove order from local state immediately
+      console.log('=== REMOVING ORDER FROM LOCAL STATE ===');
+      console.log('Filtering orders with nonce:', order.nonce, 'expires:', order.expires, 'user:', order.user);
+      
+      const updatedBuyOrders = buyOrders.filter(o => {
+        const shouldKeep = !(o.nonce === order.nonce && o.expires === order.expires && o.user?.toLowerCase() === order.user?.toLowerCase());
+        if (!shouldKeep) console.log('Removing buy order:', o);
+        return shouldKeep;
+      });
+      
+      const updatedSellOrders = sellOrders.filter(o => {
+        const shouldKeep = !(o.nonce === order.nonce && o.expires === order.expires && o.user?.toLowerCase() === order.user?.toLowerCase());
+        if (!shouldKeep) console.log('Removing sell order:', o);
+        return shouldKeep;
+      });
+      
+      console.log('Orders before:', { buyOrders: buyOrders.length, sellOrders: sellOrders.length });
+      console.log('Orders after:', { buyOrders: updatedBuyOrders.length, sellOrders: updatedSellOrders.length });
+      
       setOrders(updatedBuyOrders, updatedSellOrders);
       
-      console.log('Trade complete and order removed!');
+      console.log('Trade complete!');
       
     } catch (err: any) {
       console.error('Trade execution error:', err);
@@ -293,7 +313,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
             </div>
           ) : (
             processedOrders.sells.map((orderData, idx) => {
-              const orderKey = `${orderData.order.nonce}-${orderData.order.expires}`;
+              const orderKey = orderData.order.hash || `${orderData.order.nonce}-${orderData.order.expires}`;
               const isExecuting = executingOrder === orderKey;
               
               return (
@@ -354,7 +374,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
           </div>
         ) : (
           processedOrders.buys.map((orderData, idx) => {
-            const orderKey = `${orderData.order.nonce}-${orderData.order.expires}`;
+            const orderKey = orderData.order.hash || `${orderData.order.nonce}-${orderData.order.expires}`;
             const isExecuting = executingOrder === orderKey;
             
             return (
