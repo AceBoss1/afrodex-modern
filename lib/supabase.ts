@@ -69,23 +69,22 @@ export interface DbTrade {
   quote_amount: number;
 }
 
-export interface TradeInput {
-  tx_hash: string;
-  log_index?: number;
-  token_get: string;
-  amount_get: string;
-  token_give: string;
-  amount_give: string;
+export interface TradeExecutionInput {
+  txHash: string;
+  tokenGet: string;
+  amountGet: string;
+  tokenGive: string;
+  amountGive: string;
   maker: string;
   taker: string;
-  block_number: number;
-  block_timestamp?: string;
-  base_token: string;
-  quote_token: string;
+  blockNumber: number;
+  blockTimestamp?: string;
+  baseToken: string;
+  quoteToken: string;
   side: 'buy' | 'sell';
   price: number;
-  base_amount: number;
-  quote_amount: number;
+  baseAmount: number;
+  quoteAmount: number;
 }
 
 let supabaseClient: SupabaseClient | null = null;
@@ -150,6 +149,124 @@ export async function deactivateOrder(txHash: string, logIndex = 0): Promise<boo
     .eq('log_index', logIndex);
 
   return !error;
+}
+
+/**
+ * Deactivate an order by its hash (for off-chain orders)
+ */
+export async function deactivateOrderByHash(orderHash: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  console.log('Deactivating order by hash:', orderHash);
+
+  const { error } = await supabase
+    .from('orders')
+    .update({ is_active: false, is_cancelled: false })
+    .eq('order_hash', orderHash);
+
+  if (error) {
+    console.error('Error deactivating order by hash:', error);
+    return false;
+  }
+
+  console.log('Order deactivated successfully');
+  return true;
+}
+
+/**
+ * Deactivate an order by nonce and user address
+ */
+export async function deactivateOrderByNonceAndUser(nonce: string, userAddress: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  console.log('Deactivating order by nonce and user:', nonce, userAddress);
+
+  const { error } = await supabase
+    .from('orders')
+    .update({ is_active: false, is_cancelled: false })
+    .eq('nonce', nonce)
+    .eq('user_address', userAddress.toLowerCase());
+
+  if (error) {
+    console.error('Error deactivating order by nonce/user:', error);
+    return false;
+  }
+
+  console.log('Order deactivated by nonce/user successfully');
+  return true;
+}
+
+/**
+ * Update order fill amount
+ */
+export async function updateOrderFill(orderHash: string, amountFilled: string, isFullyFilled: boolean): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const updates: any = {
+    amount_filled: amountFilled,
+  };
+
+  if (isFullyFilled) {
+    updates.is_active = false;
+  }
+
+  const { error } = await supabase
+    .from('orders')
+    .update(updates)
+    .eq('order_hash', orderHash);
+
+  if (error) {
+    console.error('Error updating order fill:', error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Get order by hash
+ */
+export async function getOrderByHash(orderHash: string): Promise<DbOrder | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('order_hash', orderHash)
+    .single();
+
+  if (error) {
+    console.error('Error fetching order by hash:', error);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Get order by nonce and user
+ */
+export async function getOrderByNonceAndUser(nonce: string, userAddress: string): Promise<DbOrder | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('nonce', nonce)
+    .eq('user_address', userAddress.toLowerCase())
+    .single();
+
+  if (error) {
+    console.error('Error fetching order by nonce/user:', error);
+    return null;
+  }
+
+  return data;
 }
 
 /**
@@ -222,60 +339,6 @@ export async function cancelOrderByHash(orderHash: string): Promise<boolean> {
   return !error;
 }
 
-/**
- * Update order after a trade - mark as filled or partially filled
- */
-export async function updateOrderAfterTrade(
-  orderHash: string, 
-  amountFilled: string,
-  fullyFilled: boolean
-): Promise<boolean> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return false;
-
-  console.log('Updating order after trade:', { orderHash, amountFilled, fullyFilled });
-
-  const updateData: any = {
-    amount_filled: amountFilled,
-  };
-
-  if (fullyFilled) {
-    updateData.is_active = false;
-  }
-
-  const { error } = await supabase
-    .from('orders')
-    .update(updateData)
-    .eq('order_hash', orderHash);
-
-  if (error) {
-    console.error('Error updating order after trade:', error);
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Deactivate order by hash (mark as fully filled)
- */
-export async function deactivateOrderByHash(orderHash: string): Promise<boolean> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return false;
-
-  const { error } = await supabase
-    .from('orders')
-    .update({ is_active: false })
-    .eq('order_hash', orderHash);
-
-  if (error) {
-    console.error('Error deactivating order:', error);
-    return false;
-  }
-
-  return true;
-}
-
 // Trades
 export async function saveTrades(trades: DbTrade[]): Promise<boolean> {
   const supabase = getSupabaseClient();
@@ -290,39 +353,43 @@ export async function saveTrades(trades: DbTrade[]): Promise<boolean> {
 }
 
 /**
- * Record a single trade to Supabase
+ * Save a trade after execution - CRITICAL FUNCTION
+ * This is called after a trade is successfully executed on-chain
  */
-export async function recordTrade(trade: TradeInput): Promise<{ success: boolean; error?: string }> {
+export async function saveTradeAfterExecution(trade: TradeExecutionInput): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabaseClient();
   if (!supabase) {
+    console.error('saveTradeAfterExecution: Supabase not configured');
     return { success: false, error: 'Supabase not configured' };
   }
 
-  console.log('=== RECORDING TRADE TO SUPABASE ===');
-  console.log('tx_hash:', trade.tx_hash);
+  console.log('=== SAVING TRADE TO SUPABASE ===');
+  console.log('txHash:', trade.txHash);
   console.log('maker:', trade.maker);
   console.log('taker:', trade.taker);
   console.log('price:', trade.price);
-  console.log('base_amount:', trade.base_amount);
-  console.log('===================================');
+  console.log('baseAmount:', trade.baseAmount);
+  console.log('quoteAmount:', trade.quoteAmount);
+  console.log('side:', trade.side);
+  console.log('================================');
 
-  const dbTrade = {
-    tx_hash: trade.tx_hash,
-    log_index: trade.log_index || 0,
-    token_get: trade.token_get.toLowerCase(),
-    amount_get: trade.amount_get,
-    token_give: trade.token_give.toLowerCase(),
-    amount_give: trade.amount_give,
+  const dbTrade: DbTrade = {
+    tx_hash: trade.txHash,
+    log_index: 0,
+    token_get: trade.tokenGet.toLowerCase(),
+    amount_get: trade.amountGet,
+    token_give: trade.tokenGive.toLowerCase(),
+    amount_give: trade.amountGive,
     maker: trade.maker.toLowerCase(),
     taker: trade.taker.toLowerCase(),
-    block_number: trade.block_number,
-    block_timestamp: trade.block_timestamp || new Date().toISOString(),
-    base_token: trade.base_token.toLowerCase(),
-    quote_token: trade.quote_token.toLowerCase(),
+    block_number: trade.blockNumber,
+    block_timestamp: trade.blockTimestamp || new Date().toISOString(),
+    base_token: trade.baseToken.toLowerCase(),
+    quote_token: trade.quoteToken.toLowerCase(),
     side: trade.side,
     price: trade.price,
-    base_amount: trade.base_amount,
-    quote_amount: trade.quote_amount,
+    base_amount: trade.baseAmount,
+    quote_amount: trade.quoteAmount,
   };
 
   const { error } = await supabase
@@ -330,11 +397,11 @@ export async function recordTrade(trade: TradeInput): Promise<{ success: boolean
     .upsert(dbTrade, { onConflict: 'tx_hash,log_index' });
 
   if (error) {
-    console.error('Error recording trade:', error);
+    console.error('Error saving trade after execution:', error);
     return { success: false, error: error.message };
   }
 
-  console.log('Trade recorded successfully!');
+  console.log('Trade saved successfully to Supabase');
   return { success: true };
 }
 
@@ -391,25 +458,4 @@ export async function clearAllOrders(): Promise<boolean> {
     .eq('is_active', true);
 
   return !error;
-}
-
-/**
- * Get order by hash
- */
-export async function getOrderByHash(orderHash: string): Promise<DbOrder | null> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*')
-    .eq('order_hash', orderHash)
-    .single();
-
-  if (error) {
-    console.error('Error fetching order by hash:', error);
-    return null;
-  }
-
-  return data;
 }
