@@ -4,12 +4,12 @@
 import { useState, useEffect } from 'react';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { ethers, Contract } from 'ethers';
-import { History, FileText, Wallet, X, Loader2, ExternalLink, AlertCircle } from 'lucide-react';
+import { History, FileText, Wallet, X, Loader2, ExternalLink, AlertCircle, Trash2 } from 'lucide-react';
 import { Token, ZERO_ADDRESS } from '@/lib/tokens';
 import { EXCHANGE_ADDRESS, formatAmount, cancelOrder as cancelOrderOnChain } from '@/lib/exchange';
 import { EXCHANGE_ABI } from '@/lib/abi';
 import { useTradingStore } from '@/lib/store';
-import { cancelOrderByHash, getSupabaseClient } from '@/lib/supabase';
+import { cancelOrderByHash, getSupabaseClient, deactivateOrderByHash } from '@/lib/supabase';
 
 interface MyTransactionsProps {
   baseToken: Token;
@@ -73,13 +73,14 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
-  const { buyOrders, sellOrders } = useTradingStore();
+  const { buyOrders, sellOrders, setOrders } = useTradingStore();
 
   const [activeTab, setActiveTab] = useState<Tab>('orders');
   const [userOrders, setUserOrders] = useState<UserOrder[]>([]);
   const [userTrades, setUserTrades] = useState<UserTrade[]>([]);
   const [loading, setLoading] = useState(false);
   const [cancellingOrder, setCancellingOrder] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
 
   // Fetch user's orders
   useEffect(() => {
@@ -173,13 +174,75 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
     fetchUserTrades();
   }, [address, baseToken.address]);
 
-  // Cancel order
+  // Clear ALL orders for user
+  const handleClearAll = async () => {
+    if (!address) return;
+    
+    const confirmed = confirm('Delete ALL your orders? You will need to recreate them.');
+    if (!confirmed) return;
+    
+    setClearingAll(true);
+    
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        alert('Database not configured');
+        return;
+      }
+
+      // Delete all user's orders from Supabase
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('user_address', address.toLowerCase())
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error clearing orders:', error);
+        alert(`Failed to clear orders: ${error.message}`);
+        return;
+      }
+
+      // Clear local state
+      setUserOrders([]);
+      
+      // Also update the store to remove user's orders from order book
+      const updatedBuyOrders = buyOrders.filter(o => 
+        o.user?.toLowerCase() !== address.toLowerCase()
+      );
+      const updatedSellOrders = sellOrders.filter(o => 
+        o.user?.toLowerCase() !== address.toLowerCase()
+      );
+      setOrders(updatedBuyOrders, updatedSellOrders);
+      
+      alert('All orders cleared successfully!');
+    } catch (err: any) {
+      console.error('Error clearing all orders:', err);
+      alert(`Failed to clear orders: ${err.message}`);
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
+  // Cancel single order
   const handleCancelOrder = async (order: UserOrder) => {
     if (!walletClient || !order.v || !order.r || !order.s) {
+      // Off-chain cancel only (no on-chain cancel needed for off-chain orders)
       setCancellingOrder(order.orderHash);
       try {
-        await cancelOrderByHash(order.orderHash);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          await supabase
+            .from('orders')
+            .update({ is_cancelled: true, is_active: false })
+            .eq('order_hash', order.orderHash);
+        }
         setUserOrders(prev => prev.filter(o => o.orderHash !== order.orderHash));
+        
+        // Update store
+        const updatedBuyOrders = buyOrders.filter(o => o.hash !== order.orderHash);
+        const updatedSellOrders = sellOrders.filter(o => o.hash !== order.orderHash);
+        setOrders(updatedBuyOrders, updatedSellOrders);
       } catch (err) {
         console.error('Error cancelling order:', err);
       } finally {
@@ -210,6 +273,11 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
       await tx.wait();
       await cancelOrderByHash(order.orderHash);
       setUserOrders(prev => prev.filter(o => o.orderHash !== order.orderHash));
+      
+      // Update store
+      const updatedBuyOrders = buyOrders.filter(o => o.hash !== order.orderHash);
+      const updatedSellOrders = sellOrders.filter(o => o.hash !== order.orderHash);
+      setOrders(updatedBuyOrders, updatedSellOrders);
     } catch (err) {
       console.error('Error cancelling order:', err);
     } finally {
@@ -278,21 +346,21 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
                     <span>If trades fail, clear old orders and recreate</span>
                   </div>
                   <button
-                    onClick={async () => {
-                      if (confirm('Delete all your orders? You will need to recreate them.')) {
-                        const supabase = getSupabaseClient();
-                        if (supabase && address) {
-                          await supabase
-                            .from('orders')
-                            .delete()
-                            .eq('user_address', address.toLowerCase());
-                          setUserOrders([]);
-                        }
-                      }
-                    }}
-                    className="text-xs px-2 py-1 bg-yellow-600/30 hover:bg-yellow-600/50 rounded text-yellow-400 transition-colors"
+                    onClick={handleClearAll}
+                    disabled={clearingAll}
+                    className="text-xs px-2 py-1 bg-yellow-600/30 hover:bg-yellow-600/50 rounded text-yellow-400 transition-colors flex items-center gap-1 disabled:opacity-50"
                   >
-                    Clear All
+                    {clearingAll ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Clearing...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3 h-3" />
+                        Clear All
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
