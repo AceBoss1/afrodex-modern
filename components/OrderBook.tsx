@@ -15,6 +15,14 @@ interface OrderBookProps {
   quoteToken: Token;
 }
 
+interface AggregatedOrder {
+  price: number;
+  amount: number;
+  total: number;
+  depth: number;
+  orders: typeof useTradingStore.getState().buyOrders; // Array of individual orders at this price
+}
+
 export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const { buyOrders, sellOrders, isLoadingOrders, trades, setOrders, removeOrder, addTrade } = useTradingStore();
   const { setSelectedPrice, setOrderTab } = useUIStore();
@@ -25,64 +33,97 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
   const [executingOrder, setExecutingOrder] = useState<string | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
 
-  // Process orders for display
+  // Process and AGGREGATE orders by price for display
   const processedOrders = useMemo(() => {
+    // Helper to aggregate orders by price
+    const aggregateByPrice = (orders: typeof buyOrders, isBuy: boolean): AggregatedOrder[] => {
+      const priceMap = new Map<string, AggregatedOrder>();
+      
+      orders.forEach(order => {
+        const amount = parseFloat(formatAmount(
+          isBuy ? order.amountGet : order.amountGive,
+          baseToken.decimals
+        ));
+        const price = order.price || 0;
+        const total = amount * price;
+        
+        // Use price as key (rounded to avoid floating point issues)
+        const priceKey = price.toFixed(18);
+        
+        if (priceMap.has(priceKey)) {
+          const existing = priceMap.get(priceKey)!;
+          existing.amount += amount;
+          existing.total += total;
+          existing.orders.push(order);
+        } else {
+          priceMap.set(priceKey, {
+            price,
+            amount,
+            total,
+            depth: 0,
+            orders: [order],
+          });
+        }
+      });
+      
+      return Array.from(priceMap.values());
+    };
+    
+    const aggregatedBuys = aggregateByPrice(buyOrders, true);
+    const aggregatedSells = aggregateByPrice(sellOrders, false);
+    
+    // Calculate depth percentages
     const allTotals = [
-      ...buyOrders.map(o => parseFloat(formatAmount(o.amountGet, baseToken.decimals)) * (o.price || 0)),
-      ...sellOrders.map(o => parseFloat(formatAmount(o.amountGive, baseToken.decimals)) * (o.price || 0)),
+      ...aggregatedBuys.map(o => o.total),
+      ...aggregatedSells.map(o => o.total),
     ];
     const maxTotal = Math.max(...allTotals, 0.001);
-
-    const formatOrder = (order: typeof buyOrders[0], isBuy: boolean) => {
-      const amount = parseFloat(formatAmount(
-        isBuy ? order.amountGet : order.amountGive,
-        baseToken.decimals
-      ));
-      const price = order.price || 0;
-      const total = amount * price;
-      const depth = (total / maxTotal) * 100;
-
-      return { price, amount, total, depth, order };
-    };
+    
+    aggregatedBuys.forEach(o => o.depth = (o.total / maxTotal) * 100);
+    aggregatedSells.forEach(o => o.depth = (o.total / maxTotal) * 100);
+    
+    // Sort: buys descending by price, sells ascending by price
+    const sortedBuys = aggregatedBuys.sort((a, b) => b.price - a.price).slice(0, 15);
+    const sortedSells = aggregatedSells.sort((a, b) => a.price - b.price).slice(0, 15);
 
     return {
-      buys: buyOrders.slice(0, 15).map(o => formatOrder(o, true)),
-      sells: sellOrders.slice(0, 15).map(o => formatOrder(o, false)),
+      buys: sortedBuys,
+      sells: sortedSells,
     };
   }, [buyOrders, sellOrders, baseToken.decimals]);
 
   // Get spread info
   const spreadInfo = useMemo(() => {
-    if (sellOrders.length === 0 || buyOrders.length === 0) {
+    if (processedOrders.sells.length === 0 || processedOrders.buys.length === 0) {
       return { spread: 0, spreadPercent: 0, midPrice: 0 };
     }
 
-    const bestAsk = sellOrders[0].price || 0;
-    const bestBid = buyOrders[0].price || 0;
+    const bestAsk = processedOrders.sells[0].price;
+    const bestBid = processedOrders.buys[0].price;
     const spread = bestAsk - bestBid;
     const spreadPercent = bestBid > 0 ? (spread / bestBid) * 100 : 0;
     const midPrice = (bestAsk + bestBid) / 2;
 
     return { spread, spreadPercent, midPrice };
-  }, [sellOrders, buyOrders]);
+  }, [processedOrders]);
 
   const lastTrade = trades.length > 0 ? trades[0] : null;
 
-  // Handle clicking on an order - EXECUTE the trade
-  const handleOrderClick = async (orderData: typeof processedOrders.buys[0], isSellOrder: boolean) => {
-    const order = orderData.order;
+  // Handle clicking on an aggregated order row - execute against the best order at that price
+  const handleOrderClick = async (aggregatedOrder: AggregatedOrder, isSellOrder: boolean) => {
+    // Get the first order with a valid signature at this price level
+    const order = aggregatedOrder.orders.find(o => o.v && o.r && o.s);
     
-    // If order doesn't have signature, just set price
-    if (!order.v || !order.r || !order.s) {
-      setSelectedPrice(orderData.price.toString());
+    if (!order) {
+      setSelectedPrice(aggregatedOrder.price.toString());
       setOrderTab(isSellOrder ? 'buy' : 'sell');
-      setExecuteError('This order has no signature - cannot execute directly');
+      setExecuteError('No executable orders at this price - place a new order');
       setTimeout(() => setExecuteError(null), 3000);
       return;
     }
 
     if (!isConnected || !walletClient) {
-      setSelectedPrice(orderData.price.toString());
+      setSelectedPrice(aggregatedOrder.price.toString());
       setOrderTab(isSellOrder ? 'buy' : 'sell');
       setExecuteError('Connect wallet to execute orders');
       setTimeout(() => setExecuteError(null), 3000);
@@ -177,7 +218,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         baseToken: baseToken.address,
         quoteToken: quoteToken.address,
         side: isSellOrder ? 'buy' : 'sell',
-        price: orderData.price,
+        price: aggregatedOrder.price,
         baseAmount: baseAmount,
         quoteAmount: quoteAmount,
       });
@@ -193,7 +234,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         amountGive: order.amountGive,
         maker: order.user,
         taker: address!,
-        price: orderData.price,
+        price: aggregatedOrder.price,
         side: isSellOrder ? 'buy' : 'sell',
         baseAmount: baseAmount,
         quoteAmount: quoteAmount,
@@ -256,16 +297,17 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
             <div className="py-4 text-center text-gray-600 text-xs">No sell orders</div>
           ) : (
             processedOrders.sells.map((orderData, idx) => {
-              const orderKey = `${orderData.order.nonce}-${orderData.order.expires}`;
-              const isExecuting = executingOrder === orderKey;
+              const isExecuting = orderData.orders.some(o => 
+                executingOrder === `${o.nonce}-${o.expires}`
+              );
               
               return (
                 <div
-                  key={`sell-${idx}`}
+                  key={`sell-${idx}-${orderData.price}`}
                   onClick={() => !isExecuting && handleOrderClick(orderData, true)}
                   className={`orderbook-row orderbook-row-sell cursor-pointer ${isExecuting ? 'opacity-50' : ''}`}
                   style={{ '--depth': `${orderData.depth}%` } as React.CSSProperties}
-                  title="Click to buy at this price"
+                  title={`Click to buy ${formatOrderBookAmount(orderData.amount)} at ${formatOrderBookPrice(orderData.price)} (${orderData.orders.length} order${orderData.orders.length > 1 ? 's' : ''})`}
                 >
                   <span className="text-trade-sell font-mono text-[11px] flex items-center gap-1">
                     {isExecuting && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -311,16 +353,17 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
           <div className="py-4 text-center text-gray-600 text-xs">No buy orders</div>
         ) : (
           processedOrders.buys.map((orderData, idx) => {
-            const orderKey = `${orderData.order.nonce}-${orderData.order.expires}`;
-            const isExecuting = executingOrder === orderKey;
+            const isExecuting = orderData.orders.some(o => 
+              executingOrder === `${o.nonce}-${o.expires}`
+            );
             
             return (
               <div
-                key={`buy-${idx}`}
+                key={`buy-${idx}-${orderData.price}`}
                 onClick={() => !isExecuting && handleOrderClick(orderData, false)}
                 className={`orderbook-row orderbook-row-buy cursor-pointer ${isExecuting ? 'opacity-50' : ''}`}
                 style={{ '--depth': `${orderData.depth}%` } as React.CSSProperties}
-                title="Click to sell at this price"
+                title={`Click to sell ${formatOrderBookAmount(orderData.amount)} at ${formatOrderBookPrice(orderData.price)} (${orderData.orders.length} order${orderData.orders.length > 1 ? 's' : ''})`}
               >
                 <span className="text-trade-buy font-mono text-[11px] flex items-center gap-1">
                   {isExecuting && <Loader2 className="w-3 h-3 animate-spin" />}
