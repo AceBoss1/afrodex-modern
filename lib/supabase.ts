@@ -27,6 +27,7 @@ export interface DbOrder {
   v?: number;
   r?: string;
   s?: string;
+  created_at?: string;
 }
 
 export interface SignedOrderInput {
@@ -131,11 +132,26 @@ export async function getOrdersFromDb(baseToken: string, quoteToken: string, lim
     .eq('quote_token', quoteToken.toLowerCase())
     .eq('is_active', true)
     .eq('is_cancelled', false)
-    .order('block_number', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (error) console.error('Error fetching orders:', error);
-  return data || [];
+  if (error) {
+    console.error('Error fetching orders:', error);
+    return [];
+  }
+  
+  // Filter out orders without valid signatures (required for execution)
+  const validOrders = (data || []).filter(order => {
+    // Must have signature to be executable
+    if (!order.v || !order.r || !order.s) {
+      console.log('Filtering order without signature:', order.order_hash || order.tx_hash);
+      return false;
+    }
+    return true;
+  });
+  
+  console.log(`Fetched ${data?.length || 0} orders, ${validOrders.length} with valid signatures`);
+  return validOrders;
 }
 
 export async function deactivateOrder(txHash: string, logIndex = 0): Promise<boolean> {
@@ -414,7 +430,7 @@ export async function getTradesFromDb(baseToken: string, quoteToken: string, lim
     .select('*')
     .eq('base_token', baseToken.toLowerCase())
     .eq('quote_token', quoteToken.toLowerCase())
-    .order('block_number', { ascending: false })
+    .order('block_timestamp', { ascending: false })
     .limit(limit);
 
   if (error) console.error('Error fetching trades:', error);
