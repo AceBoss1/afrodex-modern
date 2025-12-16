@@ -23,11 +23,31 @@ interface TradingChartProps {
 
 type Timeframe = '1H' | '24H' | '7D' | 'ALL';
 
+// Format price with up to 15 decimals for very small prices
+function formatChartPrice(price: number): string {
+  if (price === 0) return '0';
+  
+  const absPrice = Math.abs(price);
+  
+  if (absPrice >= 1) return price.toFixed(6);
+  if (absPrice >= 0.0001) return price.toFixed(8);
+  if (absPrice >= 0.000001) return price.toFixed(10);
+  if (absPrice >= 0.000000001) return price.toFixed(12);
+  return price.toFixed(15);
+}
+
+function formatVolume(volume: number): string {
+  if (volume === 0) return '0';
+  if (volume < 0.000001) return volume.toFixed(12);
+  if (volume < 0.001) return volume.toFixed(9);
+  if (volume < 1) return volume.toFixed(6);
+  return volume.toFixed(4);
+}
+
 export default function TradingChart({ baseToken, quoteToken }: TradingChartProps) {
   const { trades, isLoadingTrades } = useTradingStore();
   const [timeframe, setTimeframe] = useState<Timeframe>('24H');
 
-  // Filter and process trades for chart
   const chartData = useMemo(() => {
     if (trades.length === 0) return [];
 
@@ -46,7 +66,6 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
 
     if (filteredTrades.length === 0) return [];
 
-    // Group trades into buckets for smoother chart
     const bucketCount = Math.min(filteredTrades.length, 100);
     const bucketSize = Math.max(1, Math.ceil(filteredTrades.length / bucketCount));
     
@@ -71,20 +90,28 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
     return data;
   }, [trades, timeframe]);
 
-  // Calculate price change
-  const priceChange = useMemo(() => {
-    if (chartData.length < 2) return { value: 0, percent: 0 };
+  const stats = useMemo(() => {
+    const now = Date.now() / 1000;
+    const oneDayAgo = now - 24 * 60 * 60;
+    const trades24h = trades.filter(t => t.timestamp >= oneDayAgo);
+    
+    const volume24h = trades24h.reduce((sum, t) => sum + t.quoteAmount, 0);
+    
+    if (chartData.length < 2) {
+      return { priceChange: { value: 0, percent: 0 }, volume24h };
+    }
+    
     const first = chartData[0].price;
     const last = chartData[chartData.length - 1].price;
     const change = last - first;
     const percent = first > 0 ? (change / first) * 100 : 0;
-    return { value: change, percent };
-  }, [chartData]);
+    
+    return { priceChange: { value: change, percent }, volume24h };
+  }, [chartData, trades]);
 
   const currentPrice = trades.length > 0 ? trades[0].price : 0;
-  const isPositive = priceChange.percent >= 0;
+  const isPositive = stats.priceChange.percent >= 0;
 
-  // Custom tooltip
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
 
@@ -92,7 +119,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
       <div className="bg-afrodex-black-card border border-white/10 rounded-lg p-3 shadow-xl">
         <p className="text-xs text-gray-400 mb-1">{label}</p>
         <p className="text-sm font-mono font-semibold">
-          {payload[0].value.toFixed(8)} {quoteToken.symbol}
+          {formatChartPrice(payload[0].value)} {quoteToken.symbol}
         </p>
       </div>
     );
@@ -100,7 +127,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
 
   if (isLoadingTrades) {
     return (
-      <div className="card h-full flex items-center justify-center">
+      <div className="card h-full flex items-center justify-center" style={{ minHeight: '220px' }}>
         <div className="text-center">
           <div className="spinner spinner-lg mb-3" />
           <p className="text-sm text-gray-500">Loading chart data...</p>
@@ -110,7 +137,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
   }
 
   return (
-    <div className="card h-full flex flex-col">
+    <div className="card h-full flex flex-col" style={{ minHeight: '220px' }}>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
         <div>
@@ -122,37 +149,46 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
               isPositive ? 'text-trade-buy' : 'text-trade-sell'
             }`}>
               {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              {isPositive ? '+' : ''}{priceChange.percent.toFixed(2)}%
+              {isPositive ? '+' : ''}{stats.priceChange.percent.toFixed(2)}%
             </span>
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono">
-              {currentPrice > 0 ? currentPrice.toFixed(8) : '0.00000000'}
+              {currentPrice > 0 ? formatChartPrice(currentPrice) : '0.000000000000000'}
             </span>
             <span className="text-sm text-gray-500">{quoteToken.symbol}</span>
           </div>
         </div>
 
-        {/* Timeframe Selector */}
-        <div className="flex gap-1 bg-afrodex-black-lighter rounded-lg p-1">
-          {(['1H', '24H', '7D', 'ALL'] as Timeframe[]).map((tf) => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-                timeframe === tf
-                  ? 'bg-afrodex-orange text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
+        {/* 24H Volume + Timeframe Selector */}
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <span className="text-[10px] text-gray-500 uppercase block">24H Vol</span>
+            <span className="text-sm font-mono font-semibold">
+              {formatVolume(stats.volume24h)} {quoteToken.symbol}
+            </span>
+          </div>
+          
+          <div className="flex gap-1 bg-afrodex-black-lighter rounded-lg p-1">
+            {(['1H', '24H', '7D', 'ALL'] as Timeframe[]).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                  timeframe === tf
+                    ? 'bg-afrodex-orange text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="flex-1 min-h-0">
+      {/* Chart - Fixed height of 220px */}
+      <div className="flex-1 min-h-0" style={{ height: '220px' }}>
         {chartData.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-500">
             <BarChart2 className="w-12 h-12 mb-3 opacity-30" />
@@ -164,23 +200,11 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
             <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop 
-                    offset="0%" 
-                    stopColor={isPositive ? '#00D26A' : '#FF4757'} 
-                    stopOpacity={0.3} 
-                  />
-                  <stop 
-                    offset="100%" 
-                    stopColor={isPositive ? '#00D26A' : '#FF4757'} 
-                    stopOpacity={0} 
-                  />
+                  <stop offset="0%" stopColor={isPositive ? '#00D26A' : '#FF4757'} stopOpacity={0.3} />
+                  <stop offset="100%" stopColor={isPositive ? '#00D26A' : '#FF4757'} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke="rgba(255,255,255,0.05)" 
-                vertical={false}
-              />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
               <XAxis
                 dataKey="time"
                 stroke="#666"
@@ -194,8 +218,8 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
                 tickLine={false}
                 axisLine={false}
                 domain={['dataMin', 'dataMax']}
-                tickFormatter={(value) => value.toFixed(6)}
-                width={80}
+                tickFormatter={(value) => formatChartPrice(value)}
+                width={100}
               />
               <Tooltip content={<CustomTooltip />} />
               <Area
@@ -205,12 +229,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
                 strokeWidth={2}
                 fill="url(#priceGradient)"
                 dot={false}
-                activeDot={{
-                  r: 4,
-                  fill: isPositive ? '#00D26A' : '#FF4757',
-                  stroke: '#fff',
-                  strokeWidth: 2,
-                }}
+                activeDot={{ r: 4, fill: isPositive ? '#00D26A' : '#FF4757', stroke: '#fff', strokeWidth: 2 }}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -229,17 +248,13 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
           <div>
             <p className="text-xs text-gray-500 mb-1">24h High</p>
             <p className="text-sm font-mono">
-              {chartData.length > 0 
-                ? Math.max(...chartData.map(d => d.price)).toFixed(8)
-                : '—'}
+              {chartData.length > 0 ? formatChartPrice(Math.max(...chartData.map(d => d.price))) : '—'}
             </p>
           </div>
           <div>
             <p className="text-xs text-gray-500 mb-1">24h Low</p>
             <p className="text-sm font-mono">
-              {chartData.length > 0 
-                ? Math.min(...chartData.map(d => d.price)).toFixed(8)
-                : '—'}
+              {chartData.length > 0 ? formatChartPrice(Math.min(...chartData.map(d => d.price))) : '—'}
             </p>
           </div>
         </div>
