@@ -371,8 +371,12 @@ export async function saveTrades(trades: DbTrade[]): Promise<boolean> {
 /**
  * Save a trade after execution - CRITICAL FUNCTION
  * This is called after a trade is successfully executed on-chain
+ * Also records stats for TGIF rewards
  */
-export async function saveTradeAfterExecution(trade: TradeExecutionInput): Promise<{ success: boolean; error?: string }> {
+export async function saveTradeAfterExecution(
+  trade: TradeExecutionInput,
+  gasFeeEth?: number
+): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabaseClient();
   if (!supabase) {
     console.error('saveTradeAfterExecution: Supabase not configured');
@@ -418,6 +422,19 @@ export async function saveTradeAfterExecution(trade: TradeExecutionInput): Promi
   }
 
   console.log('Trade saved successfully to Supabase');
+  
+  // Record TGIF stats for the taker (who paid gas)
+  // Platform fee is 0.3% of the trade value (quoteAmount)
+  const platformFeeEth = trade.quoteAmount * 0.003;
+  const volumeEth = trade.quoteAmount;
+  
+  await recordTradeStats(
+    trade.taker,
+    gasFeeEth || 0,
+    platformFeeEth,
+    volumeEth
+  );
+  
   return { success: true };
 }
 
@@ -474,4 +491,193 @@ export async function clearAllOrders(): Promise<boolean> {
     .eq('is_active', true);
 
   return !error;
+}
+
+// ============================================
+// TGIF Rewards - Fee Tracking Functions
+// ============================================
+
+/**
+ * Record trading stats for TGIF rewards
+ * Called after every trade execution for the TAKER only
+ */
+export async function recordTradeStats(
+  takerAddress: string,
+  gasFeeEth: number,
+  platformFeeEth: number,
+  volumeEth: number
+): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    // Call the database function to update stats
+    const { error } = await supabase.rpc('update_trade_stats', {
+      p_wallet: takerAddress.toLowerCase(),
+      p_gas_fee_eth: gasFeeEth,
+      p_platform_fee_eth: platformFeeEth,
+      p_volume_eth: volumeEth,
+    });
+
+    if (error) {
+      console.error('Error recording trade stats:', error);
+      
+      // Fallback: Direct insert/update if RPC fails
+      await recordTradeStatsDirect(takerAddress, gasFeeEth, platformFeeEth, volumeEth);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('recordTradeStats error:', err);
+    return false;
+  }
+}
+
+/**
+ * Direct insert/update for trade stats (fallback if RPC fails)
+ */
+async function recordTradeStatsDirect(
+  takerAddress: string,
+  gasFeeEth: number,
+  platformFeeEth: number,
+  volumeEth: number
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  const wallet = takerAddress.toLowerCase();
+  
+  // Calculate current week (Friday to Thursday)
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const daysSinceFriday = (dayOfWeek + 2) % 7;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - daysSinceFriday);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+
+  // Update user profile
+  const { data: existing } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('wallet_address', wallet)
+    .single();
+
+  if (existing) {
+    await supabase
+      .from('user_profiles')
+      .update({
+        total_gas_fees_eth: (existing.total_gas_fees_eth || 0) + gasFeeEth,
+        total_platform_fees_eth: (existing.total_platform_fees_eth || 0) + platformFeeEth,
+        total_volume_eth: (existing.total_volume_eth || 0) + volumeEth,
+        trade_count: (existing.trade_count || 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('wallet_address', wallet);
+  } else {
+    await supabase
+      .from('user_profiles')
+      .insert({
+        wallet_address: wallet,
+        total_gas_fees_eth: gasFeeEth,
+        total_platform_fees_eth: platformFeeEth,
+        total_volume_eth: volumeEth,
+        trade_count: 1,
+      });
+  }
+
+  // Update weekly stats
+  const weekStartStr = weekStart.toISOString().split('T')[0];
+  
+  const { data: weeklyExisting } = await supabase
+    .from('weekly_trading_stats')
+    .select('*')
+    .eq('wallet_address', wallet)
+    .eq('week_start', weekStartStr)
+    .single();
+
+  if (weeklyExisting) {
+    await supabase
+      .from('weekly_trading_stats')
+      .update({
+        gas_fees_eth: (weeklyExisting.gas_fees_eth || 0) + gasFeeEth,
+        platform_fees_eth: (weeklyExisting.platform_fees_eth || 0) + platformFeeEth,
+        volume_eth: (weeklyExisting.volume_eth || 0) + volumeEth,
+        trade_count: (weeklyExisting.trade_count || 0) + 1,
+      })
+      .eq('wallet_address', wallet)
+      .eq('week_start', weekStartStr);
+  } else {
+    await supabase
+      .from('weekly_trading_stats')
+      .insert({
+        wallet_address: wallet,
+        week_start: weekStartStr,
+        week_end: weekEnd.toISOString().split('T')[0],
+        gas_fees_eth: gasFeeEth,
+        platform_fees_eth: platformFeeEth,
+        volume_eth: volumeEth,
+        trade_count: 1,
+      });
+  }
+}
+
+/**
+ * Get user's TGIF stats
+ */
+export async function getUserTGIFStats(walletAddress: string): Promise<{
+  profile: any;
+  weeklyStats: any;
+} | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const wallet = walletAddress.toLowerCase();
+
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('wallet_address', wallet)
+    .single();
+
+  // Get current week start
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const daysSinceFriday = (dayOfWeek + 2) % 7;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - daysSinceFriday);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekStartStr = weekStart.toISOString().split('T')[0];
+
+  const { data: weeklyStats } = await supabase
+    .from('weekly_trading_stats')
+    .select('*')
+    .eq('wallet_address', wallet)
+    .eq('week_start', weekStartStr)
+    .single();
+
+  return { profile, weeklyStats };
+}
+
+/**
+ * Get leaderboard data
+ */
+export async function getLeaderboard(type: 'weekly' | 'alltime', limit = 50): Promise<any[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  if (type === 'weekly') {
+    const { data } = await supabase
+      .from('weekly_leaderboard')
+      .select('*')
+      .limit(limit);
+    return data || [];
+  } else {
+    const { data } = await supabase
+      .from('leaderboard')
+      .select('*')
+      .limit(limit);
+    return data || [];
+  }
 }
