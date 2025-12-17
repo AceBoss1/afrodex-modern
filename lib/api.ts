@@ -47,11 +47,18 @@ export interface ProcessedTrade {
 
 /**
  * Fetch orders from Supabase
+ * @param providerOrBaseToken - Provider (ignored) or baseToken for backwards compatibility
+ * @param baseTokenOrQuoteToken - baseToken or quoteToken
+ * @param quoteTokenOptional - quoteToken if 3 args provided
  */
 export async function fetchOrders(
-  baseToken: Token,
-  quoteToken: Token
+  providerOrBaseToken: any,
+  baseTokenOrQuoteToken: Token,
+  quoteTokenOptional?: Token
 ): Promise<{ buyOrders: ProcessedOrder[]; sellOrders: ProcessedOrder[] }> {
+  // Handle both 2-arg and 3-arg calls for backwards compatibility
+  const baseToken: Token = quoteTokenOptional ? baseTokenOrQuoteToken : providerOrBaseToken;
+  const quoteToken: Token = quoteTokenOptional || baseTokenOrQuoteToken;
   console.log('Fetching orders from Supabase...');
   
   const orders = await getOrdersFromDb(baseToken.address, quoteToken.address);
@@ -99,11 +106,18 @@ export async function fetchOrders(
 
 /**
  * Fetch trades from Supabase
+ * @param providerOrBaseToken - Provider (ignored) or baseToken for backwards compatibility
+ * @param baseTokenOrQuoteToken - baseToken or quoteToken
+ * @param quoteTokenOptional - quoteToken if 3 args provided
  */
 export async function fetchTrades(
-  baseToken: Token,
-  quoteToken: Token
+  providerOrBaseToken: any,
+  baseTokenOrQuoteToken: Token,
+  quoteTokenOptional?: Token
 ): Promise<ProcessedTrade[]> {
+  // Handle both 2-arg and 3-arg calls for backwards compatibility
+  const baseToken: Token = quoteTokenOptional ? baseTokenOrQuoteToken : providerOrBaseToken;
+  const quoteToken: Token = quoteTokenOptional || baseTokenOrQuoteToken;
   console.log('Fetching trades from Supabase...');
   
   const trades = await getTradesFromDb(baseToken.address, quoteToken.address);
