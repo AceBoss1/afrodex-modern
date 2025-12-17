@@ -84,6 +84,9 @@ export default function Leaderboard() {
       setLoading(true);
       const supabase = getSupabaseClient();
       
+      let fetchedWeeklyData: WeeklyEntry[] = [];
+      let fetchedAllTimeData: LeaderboardEntry[] = [];
+      
       try {
         // Get current week range
         const range = getCurrentWeekRange();
@@ -100,10 +103,11 @@ export default function Leaderboard() {
             .limit(50);
           
           if (allTime) {
-            setAllTimeData(allTime.map((entry, idx) => ({
+            fetchedAllTimeData = allTime.map((entry, idx) => ({
               rank: idx + 1,
               ...entry,
-            })));
+            }));
+            setAllTimeData(fetchedAllTimeData);
           }
           
           // Fetch weekly leaderboard
@@ -117,13 +121,14 @@ export default function Leaderboard() {
             const totalWeightedFees = weekly.reduce((sum, e) => sum + (e.weighted_fees || 0), 0);
             const pool = getWeeklyRewardPool(1);
             
-            setWeeklyData(weekly.map((entry, idx) => ({
+            fetchedWeeklyData = weekly.map((entry, idx) => ({
               rank: idx + 1,
               ...entry,
               estimated_reward: totalWeightedFees > 0 
                 ? (entry.weighted_fees / totalWeightedFees) * pool 
                 : 0,
-            })));
+            }));
+            setWeeklyData(fetchedWeeklyData);
           }
         }
         
@@ -133,16 +138,16 @@ export default function Leaderboard() {
           const stakeInfo = await getStakeInfo(provider, address);
           const badge = getBadgeTier(stakeInfo.stakeBalanceFormatted);
           
-          // Find user's ranks
-          const weeklyRank = weeklyData.findIndex(e => 
+          // Find user's ranks using local variables
+          const weeklyRank = fetchedWeeklyData.findIndex(e => 
             e.wallet_address.toLowerCase() === address.toLowerCase()
           ) + 1;
-          const allTimeRank = allTimeData.findIndex(e => 
+          const allTimeRank = fetchedAllTimeData.findIndex(e => 
             e.wallet_address.toLowerCase() === address.toLowerCase()
           ) + 1;
           
           // Get user's weekly fees
-          const userWeekly = weeklyData.find(e => 
+          const userWeekly = fetchedWeeklyData.find(e => 
             e.wallet_address.toLowerCase() === address.toLowerCase()
           );
           
@@ -281,7 +286,7 @@ export default function Leaderboard() {
       <div className="mb-4 p-3 bg-afrodex-black-lighter rounded-lg flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Gift className="w-5 h-5 text-yellow-500" />
-          <span className="text-sm text-gray-400">This Week's Reward Pool:</span>
+          <span className="text-sm text-gray-400">This Week&apos;s Reward Pool:</span>
         </div>
         <span className="font-bold text-yellow-500">
           {formatRewardAmount(weeklyPool)} AfroX
