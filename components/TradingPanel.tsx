@@ -1,31 +1,25 @@
 // components/TradingPanel.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
+import { useState, useEffect, useMemo } from 'react';
+import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
 import { ethers } from 'ethers';
-import { Token, ZERO_ADDRESS } from '@/lib/tokens';
+import { useTradingStore, useUIStore } from '@/lib/store';
 import { 
-  createSignedOrder, 
   parseAmount, 
-  formatAmount,
+  formatAmount, 
   formatDisplayAmount,
   formatDisplayPrice,
-  generateNonce,
-  getExpirationBlock,
-  executeTrade,
+  getExpirationBlock, 
+  generateNonce, 
+  createSignedOrder,
   preTradeCheck,
+  executeTrade,
   SignedOrder,
 } from '@/lib/exchange';
-import { 
-  saveSignedOrder, 
-  isSupabaseConfigured, 
-  deactivateOrderByHash,
-  deactivateOrderByNonceAndUser,
-  saveTradeAfterExecution,
-} from '@/lib/supabase';
-import { useTradingStore, useUIStore } from '@/lib/store';
-import { ArrowDownUp, AlertCircle, Loader2, CheckCircle, Zap } from 'lucide-react';
+import { Token, ZERO_ADDRESS } from '@/lib/tokens';
+import { saveSignedOrder, deactivateOrderByHash, saveTradeAfterExecution } from '@/lib/supabase';
+import { ArrowDownUp, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface TradingPanelProps {
   baseToken: Token;
@@ -33,139 +27,73 @@ interface TradingPanelProps {
 }
 
 export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProps) {
+  const { selectedPrice, orderTab, setOrderTab, setSelectedPrice } = useUIStore();
+  const { buyOrders, sellOrders, addOrder, removeOrder, setOrders, addTrade } = useTradingStore();
   const { address, isConnected } = useAccount();
-  const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
-  const { balances, trades, buyOrders, sellOrders, setOrders, removeOrder, addTrade } = useTradingStore();
-  const { orderTab, setOrderTab, selectedPrice, setSelectedPrice } = useUIStore();
+  const publicClient = usePublicClient();
 
   const [price, setPrice] = useState('');
   const [amount, setAmount] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Update price when selected from order book
   useEffect(() => {
     if (selectedPrice) {
       setPrice(selectedPrice);
-      setSelectedPrice(null);
     }
-  }, [selectedPrice, setSelectedPrice]);
+  }, [selectedPrice]);
 
-  useEffect(() => {
-    if (!price && trades.length > 0) {
-      setPrice(trades[0].price.toFixed(15));
+  // Calculate total
+  const total = useMemo(() => {
+    const p = parseFloat(price) || 0;
+    const a = parseFloat(amount) || 0;
+    return p * a;
+  }, [price, amount]);
+
+  // Get best prices from order book
+  const bestPrices = useMemo(() => {
+    const bestAsk = sellOrders.length > 0 
+      ? Math.min(...sellOrders.map(o => o.price || Infinity))
+      : null;
+    const bestBid = buyOrders.length > 0
+      ? Math.max(...buyOrders.map(o => o.price || 0))
+      : null;
+    return { bestAsk, bestBid };
+  }, [buyOrders, sellOrders]);
+
+  const handleSubmit = async () => {
+    if (!isConnected || !walletClient || !publicClient) {
+      setError('Please connect your wallet');
+      return;
     }
-  }, [trades, price]);
-
-  const baseBalance = balances[baseToken.address.toLowerCase()];
-  const quoteBalance = balances[quoteToken.address.toLowerCase()];
-
-  const calculateTotal = (): string => {
-    if (!price || !amount) return '0';
-    const priceNum = parseFloat(price);
-    const amountNum = parseFloat(amount);
-    if (isNaN(priceNum) || isNaN(amountNum)) return '0';
-    const result = priceNum * amountNum;
-    if (result === 0) return '0';
-    return result.toFixed(18).replace(/\.?0+$/, '');
-  };
-  
-  const totalStr = calculateTotal();
-  const totalNum = parseFloat(totalStr) || 0;
-  const totalDisplay = formatDisplayPrice(totalNum);
-
-  const getAvailableBalance = () => {
-    if (orderTab === 'buy') {
-      return quoteBalance?.exchange 
-        ? parseFloat(formatAmount(quoteBalance.exchange, quoteToken.decimals))
-        : 0;
-    } else {
-      return baseBalance?.exchange 
-        ? parseFloat(formatAmount(baseBalance.exchange, baseToken.decimals))
-        : 0;
-    }
-  };
-  
-  const getAvailableBalanceStr = () => {
-    if (orderTab === 'buy') {
-      return quoteBalance?.exchange 
-        ? formatAmount(quoteBalance.exchange, quoteToken.decimals)
-        : '0';
-    } else {
-      return baseBalance?.exchange 
-        ? formatAmount(baseBalance.exchange, baseToken.decimals)
-        : '0';
-    }
-  };
-
-  const availableDisplay = formatDisplayAmount(getAvailableBalanceStr());
-
-  const setPercentage = (percent: number) => {
-    const available = getAvailableBalance();
-    if (available <= 0) return;
-
-    if (orderTab === 'buy') {
-      const priceNum = parseFloat(price) || trades[0]?.price || 0;
-      if (priceNum > 0) {
-        const maxAmount = (available * percent) / priceNum;
-        setAmount(maxAmount.toFixed(6));
-      }
-    } else {
-      setAmount((available * percent).toFixed(6));
-    }
-  };
-
-  const findMatchingOrders = (targetPrice: number, isBuyOrder: boolean) => {
-    const counterOrders = isBuyOrder ? sellOrders : buyOrders;
-    
-    const matched = counterOrders.filter(order => {
-      const hasSignature = !!(order.v && order.r && order.s);
-      const isOwnOrder = order.user?.toLowerCase() === address?.toLowerCase();
-      const orderPrice = order.price || 0;
-      const priceMatch = isBuyOrder 
-        ? orderPrice <= targetPrice 
-        : orderPrice >= targetPrice;
-      
-      if (!hasSignature) return false;
-      if (isOwnOrder) return false;
-      return priceMatch;
-    }).sort((a, b) => {
-      if (isBuyOrder) {
-        return (a.price || 0) - (b.price || 0);
-      } else {
-        return (b.price || 0) - (a.price || 0);
-      }
-    });
-    
-    return matched;
-  };
-
-  const handlePlaceOrder = async () => {
-    if (!walletClient || !price || !amount) return;
 
     const priceNum = parseFloat(price);
     const amountNum = parseFloat(amount);
 
-    if (priceNum <= 0 || amountNum <= 0) {
-      setError('Price and amount must be greater than 0');
+    if (isNaN(priceNum) || priceNum <= 0) {
+      setError('Please enter a valid price');
       return;
     }
 
-    if (!isSupabaseConfigured()) {
-      setError('Order book not configured. Please set up Supabase.');
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setError('Please enter a valid amount');
       return;
     }
 
-    const available = getAvailableBalance();
-    const required = orderTab === 'buy' ? totalNum : amountNum;
+    // Calculate order value in ETH
+    const orderValue = priceNum * amountNum;
     
-    if (required > available) {
-      setError(`Insufficient ${orderTab === 'buy' ? quoteToken.symbol : baseToken.symbol} balance. Deposit first.`);
+    // FIXED: Only check minimum if orderValue is actually 0 or negative
+    // Very small values like 0.0001 ETH are valid
+    if (orderValue <= 0) {
+      setError('Order value must be greater than 0');
       return;
     }
 
-    setLoading(true);
+    setIsSubmitting(true);
     setError(null);
     setSuccess(null);
 
@@ -173,312 +101,345 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
       const provider = new ethers.BrowserProvider(walletClient as any);
       const signer = await provider.getSigner();
 
-      const matchingOrders = findMatchingOrders(priceNum, orderTab === 'buy');
-      let remainingAmount = amountNum;
-      let executedTrades = 0;
-      let skippedOrders: string[] = [];
+      // For BUY orders: tokenGet = base token (what we want), tokenGive = ETH (what we pay)
+      // For SELL orders: tokenGet = ETH (what we want), tokenGive = base token (what we pay)
+      const isBuy = orderTab === 'buy';
 
-      for (const order of matchingOrders) {
-        if (remainingAmount <= 0) break;
+      const baseAmountWei = parseAmount(amountNum.toString(), baseToken.decimals);
+      const quoteAmountWei = parseAmount(orderValue.toString(), quoteToken.decimals);
 
-        const orderAmountAvailable = parseFloat(
-          formatAmount(
-            order.availableVolume || (orderTab === 'buy' ? order.amountGive : order.amountGet),
-            baseToken.decimals
-          )
-        );
+      // Validate parsed amounts
+      if (baseAmountWei === '0' || quoteAmountWei === '0') {
+        setError('Amount too small to process');
+        setIsSubmitting(false);
+        return;
+      }
 
-        const amountToTake = Math.min(remainingAmount, orderAmountAvailable);
-        if (amountToTake <= 0) continue;
+      const tokenGet = isBuy ? baseToken.address : ZERO_ADDRESS;
+      const amountGet = isBuy ? baseAmountWei : quoteAmountWei;
+      const tokenGive = isBuy ? ZERO_ADDRESS : baseToken.address;
+      const amountGive = isBuy ? quoteAmountWei : baseAmountWei;
 
-        try {
+      console.log('Creating order:', {
+        side: orderTab,
+        tokenGet,
+        amountGet,
+        tokenGive,
+        amountGive,
+        price: priceNum,
+        amount: amountNum,
+        total: orderValue,
+      });
+
+      // Check if there's a matching order to execute immediately
+      const matchingOrders = isBuy 
+        ? sellOrders.filter(o => (o.price || 0) <= priceNum && o.v && o.r && o.s)
+        : buyOrders.filter(o => (o.price || 0) >= priceNum && o.v && o.r && o.s);
+
+      if (matchingOrders.length > 0) {
+        // Execute against best matching order
+        const bestMatch = isBuy
+          ? matchingOrders.reduce((best, o) => (o.price || 0) < (best.price || 0) ? o : best)
+          : matchingOrders.reduce((best, o) => (o.price || 0) > (best.price || 0) ? o : best);
+
+        // Can't trade against your own order
+        if (bestMatch.user?.toLowerCase() === address?.toLowerCase()) {
+          // Place as new order instead
+        } else {
+          console.log('Found matching order, executing trade...');
+          
           const signedOrder: SignedOrder = {
-            tokenGet: order.tokenGet,
-            amountGet: order.amountGet,
-            tokenGive: order.tokenGive,
-            amountGive: order.amountGive,
-            expires: order.expires,
-            nonce: order.nonce,
-            user: order.user,
-            v: Number(order.v),
-            r: order.r!,
-            s: order.s!,
-            hash: order.hash || '',
+            tokenGet: bestMatch.tokenGet,
+            amountGet: bestMatch.amountGet,
+            tokenGive: bestMatch.tokenGive,
+            amountGive: bestMatch.amountGive,
+            expires: bestMatch.expires,
+            nonce: bestMatch.nonce,
+            user: bestMatch.user,
+            v: Number(bestMatch.v),
+            r: bestMatch.r!,
+            s: bestMatch.s!,
+            hash: bestMatch.hash || '',
           };
 
-          const amountInWei = parseAmount(amountToTake.toString(), baseToken.decimals);
+          // Use the order's amountGet for the trade
+          const tradeAmount = bestMatch.amountGet;
+
+          const preCheck = await preTradeCheck(provider, signedOrder, tradeAmount, address!);
           
-          const preCheck = await preTradeCheck(provider, signedOrder, amountInWei, address!);
-          if (!preCheck.canTrade) {
-            skippedOrders.push(preCheck.reason || 'Unknown');
-            continue;
+          if (preCheck.canTrade) {
+            const tx = await executeTrade(signer, signedOrder, tradeAmount);
+            const receipt = await tx.wait();
+            
+            // Deactivate the matched order
+            if (bestMatch.hash) {
+              await deactivateOrderByHash(bestMatch.hash);
+            }
+            
+            // Remove from local state
+            const updatedBuyOrders = buyOrders.filter(o => o.hash !== bestMatch.hash);
+            const updatedSellOrders = sellOrders.filter(o => o.hash !== bestMatch.hash);
+            setOrders(updatedBuyOrders, updatedSellOrders);
+            
+            // Record trade
+            await saveTradeAfterExecution({
+              txHash: tx.hash,
+              tokenGet: bestMatch.tokenGet,
+              amountGet: bestMatch.amountGet,
+              tokenGive: bestMatch.tokenGive,
+              amountGive: bestMatch.amountGive,
+              maker: bestMatch.user,
+              taker: address!,
+              blockNumber: receipt?.blockNumber || 0,
+              blockTimestamp: new Date().toISOString(),
+              baseToken: baseToken.address,
+              quoteToken: quoteToken.address,
+              side: isBuy ? 'buy' : 'sell',
+              price: bestMatch.price || priceNum,
+              baseAmount: amountNum,
+              quoteAmount: orderValue,
+            });
+            
+            // Add to local trades
+            addTrade({
+              txHash: tx.hash,
+              blockNumber: receipt?.blockNumber || 0,
+              timestamp: Math.floor(Date.now() / 1000),
+              tokenGet: bestMatch.tokenGet,
+              amountGet: bestMatch.amountGet,
+              tokenGive: bestMatch.tokenGive,
+              amountGive: bestMatch.amountGive,
+              maker: bestMatch.user,
+              taker: address!,
+              price: bestMatch.price || priceNum,
+              side: isBuy ? 'buy' : 'sell',
+              baseAmount: amountNum,
+              quoteAmount: orderValue,
+            });
+            
+            setSuccess(`Trade executed! TX: ${tx.hash.slice(0, 10)}...`);
+            setPrice('');
+            setAmount('');
+            setSelectedPrice('');
+            setIsSubmitting(false);
+            setTimeout(() => setSuccess(null), 5000);
+            return;
+          } else {
+            console.log('Pre-trade check failed:', preCheck.reason);
+            // Fall through to create new order
           }
-          
-          const tx = await executeTrade(signer, signedOrder, amountInWei);
-          const receipt = await tx.wait();
-          
-          // Deactivate order in Supabase
-          if (order.hash) {
-            await deactivateOrderByHash(order.hash);
-          } else if (order.nonce && order.user) {
-            await deactivateOrderByNonceAndUser(order.nonce, order.user);
-          }
-          
-          if (order.hash) {
-            removeOrder(order.hash);
-          }
-          
-          const tradeBaseAmount = amountToTake;
-          const tradeQuoteAmount = amountToTake * (order.price || priceNum);
-          
-          // Record the trade in Supabase
-          await saveTradeAfterExecution({
-            txHash: tx.hash,
-            tokenGet: order.tokenGet,
-            amountGet: order.amountGet,
-            tokenGive: order.tokenGive,
-            amountGive: order.amountGive,
-            maker: order.user,
-            taker: address!,
-            blockNumber: receipt?.blockNumber || 0,
-            blockTimestamp: new Date().toISOString(),
-            baseToken: baseToken.address,
-            quoteToken: quoteToken.address,
-            side: orderTab,
-            price: order.price || priceNum,
-            baseAmount: tradeBaseAmount,
-            quoteAmount: tradeQuoteAmount,
-          });
-          
-          addTrade({
-            txHash: tx.hash,
-            blockNumber: receipt?.blockNumber || 0,
-            timestamp: Math.floor(Date.now() / 1000),
-            tokenGet: order.tokenGet,
-            amountGet: order.amountGet,
-            tokenGive: order.tokenGive,
-            amountGive: order.amountGive,
-            maker: order.user,
-            taker: address!,
-            price: order.price || priceNum,
-            side: orderTab,
-            baseAmount: tradeBaseAmount,
-            quoteAmount: tradeQuoteAmount,
-          });
-          
-          remainingAmount -= amountToTake;
-          executedTrades++;
-        } catch (err: any) {
-          console.error('Error executing trade:', err);
-          skippedOrders.push(err.reason || err.message || 'Trade failed');
         }
       }
 
-      // Refresh order list
-      if (executedTrades > 0) {
-        const executedOrderNonces = matchingOrders.slice(0, executedTrades).map(o => o.nonce);
-        const updatedBuyOrders = buyOrders.filter(o => !executedOrderNonces.includes(o.nonce));
-        const updatedSellOrders = sellOrders.filter(o => !executedOrderNonces.includes(o.nonce));
-        setOrders(updatedBuyOrders, updatedSellOrders);
+      // Create a new order (off-chain, gasless)
+      const expires = await getExpirationBlock(provider, 100000);
+      const nonce = generateNonce();
+
+      const signedOrder = await createSignedOrder(
+        signer,
+        tokenGet,
+        amountGet,
+        tokenGive,
+        amountGive,
+        expires,
+        nonce
+      );
+
+      // Save to Supabase
+      const result = await saveSignedOrder({
+        token_get: signedOrder.tokenGet,
+        amount_get: signedOrder.amountGet,
+        token_give: signedOrder.tokenGive,
+        amount_give: signedOrder.amountGive,
+        expires: signedOrder.expires,
+        nonce: signedOrder.nonce,
+        user_address: signedOrder.user,
+        base_token: baseToken.address,
+        quote_token: quoteToken.address,
+        side: orderTab,
+        price: priceNum,
+        base_amount: amountNum,
+        quote_amount: orderValue,
+        order_hash: signedOrder.hash,
+        v: signedOrder.v,
+        r: signedOrder.r,
+        s: signedOrder.s,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save order');
       }
 
-      // Place remaining as new order
-      if (remainingAmount > 0.0001) {
-        const remainingTotal = remainingAmount * priceNum;
-        const amountBase = parseAmount(remainingAmount.toString(), baseToken.decimals);
-        const amountQuote = parseAmount(remainingTotal.toString(), quoteToken.decimals);
-        
-        const tokenGet = orderTab === 'buy' ? baseToken.address : quoteToken.address;
-        const amountGet = orderTab === 'buy' ? amountBase : amountQuote;
-        const tokenGive = orderTab === 'buy' ? quoteToken.address : baseToken.address;
-        const amountGive = orderTab === 'buy' ? amountQuote : amountBase;
+      // Add to local state
+      addOrder({
+        tokenGet: signedOrder.tokenGet,
+        amountGet: signedOrder.amountGet,
+        tokenGive: signedOrder.tokenGive,
+        amountGive: signedOrder.amountGive,
+        expires: signedOrder.expires,
+        nonce: signedOrder.nonce,
+        user: signedOrder.user,
+        side: orderTab,
+        price: priceNum,
+        v: signedOrder.v,
+        r: signedOrder.r,
+        s: signedOrder.s,
+        hash: signedOrder.hash,
+      });
 
-        if (amountGet === '0' || amountGive === '0') {
-          setError(`Invalid order: amounts cannot be 0. Try a higher price or amount.`);
-          setLoading(false);
-          return;
-        }
-
-        const expires = await getExpirationBlock(provider, 10000);
-        const nonce = generateNonce();
-
-        const signedOrder = await createSignedOrder(
-          signer,
-          tokenGet,
-          amountGet,
-          tokenGive,
-          amountGive,
-          expires,
-          nonce
-        );
-
-        await saveSignedOrder({
-          token_get: tokenGet,
-          amount_get: amountGet,
-          token_give: tokenGive,
-          amount_give: amountGive,
-          expires,
-          nonce,
-          user_address: signedOrder.user,
-          base_token: baseToken.address,
-          quote_token: quoteToken.address,
-          side: orderTab,
-          price: priceNum,
-          base_amount: remainingAmount,
-          quote_amount: remainingTotal,
-          order_hash: signedOrder.hash!,
-          v: signedOrder.v!,
-          r: signedOrder.r!,
-          s: signedOrder.s!,
-        });
-
-        if (executedTrades > 0) {
-          setSuccess(`Executed ${executedTrades} trade(s), placed order for ${remainingAmount.toFixed(4)} ${baseToken.symbol}`);
-        } else {
-          setSuccess(`${orderTab === 'buy' ? 'Buy' : 'Sell'} order placed! (Gasless)`);
-        }
-      } else {
-        setSuccess(`Executed ${executedTrades} trade(s) - order fully filled!`);
-      }
-
+      setSuccess('Order placed successfully!');
       setPrice('');
       setAmount('');
+      setSelectedPrice('');
       setTimeout(() => setSuccess(null), 5000);
-      
+
     } catch (err: any) {
-      console.error('Error placing order:', err);
-      setError(err.message || 'Failed to place order.');
+      console.error('Order error:', err);
+      if (err.code === 'ACTION_REJECTED') {
+        setError('Transaction rejected by user');
+      } else {
+        setError(err.reason || err.message || 'Failed to place order');
+      }
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  const isBuy = orderTab === 'buy';
-  const matchingOrdersCount = price ? findMatchingOrders(parseFloat(price) || 0, isBuy).length : 0;
+  const handleSetBestPrice = (type: 'bid' | 'ask') => {
+    if (type === 'bid' && bestPrices.bestBid) {
+      setPrice(formatDisplayPrice(bestPrices.bestBid));
+    } else if (type === 'ask' && bestPrices.bestAsk) {
+      setPrice(formatDisplayPrice(bestPrices.bestAsk));
+    }
+  };
 
   return (
-    <div className="card flex flex-col">
+    <div className="card">
       <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
         <ArrowDownUp className="w-4 h-4 text-afrodex-orange" />
         Place Order
       </h3>
 
-      <div className="flex gap-2 mb-4">
+      {/* Buy/Sell Tabs */}
+      <div className="flex gap-1 mb-4 p-1 bg-afrodex-black-lighter rounded-lg">
         <button
           onClick={() => setOrderTab('buy')}
-          className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${
-            orderTab === 'buy' 
-              ? 'bg-trade-buy text-black' 
-              : 'bg-transparent text-gray-400 hover:text-white'
+          className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1 ${
+            orderTab === 'buy'
+              ? 'bg-trade-buy text-white'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
           }`}
         >
+          <TrendingUp className="w-4 h-4" />
           Buy
         </button>
         <button
           onClick={() => setOrderTab('sell')}
-          className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${
-            orderTab === 'sell' 
-              ? 'bg-trade-sell text-white' 
-              : 'bg-transparent text-gray-400 hover:text-white'
+          className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1 ${
+            orderTab === 'sell'
+              ? 'bg-trade-sell text-white'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
           }`}
         >
+          <TrendingDown className="w-4 h-4" />
           Sell
         </button>
       </div>
 
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="text-xs text-gray-500">Price ({quoteToken.symbol})</label>
-          <span className="text-xs text-gray-500">
-            Avail: <span className="text-white">{availableDisplay}</span> {orderTab === 'buy' ? quoteToken.symbol : baseToken.symbol}
-          </span>
+      {/* Price Input */}
+      <div className="mb-3">
+        <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <span>Price ({quoteToken.symbol})</span>
+          <div className="flex gap-2">
+            {bestPrices.bestBid && (
+              <button
+                onClick={() => handleSetBestPrice('bid')}
+                className="text-trade-buy hover:underline"
+              >
+                Bid: {formatDisplayPrice(bestPrices.bestBid)}
+              </button>
+            )}
+            {bestPrices.bestAsk && (
+              <button
+                onClick={() => handleSetBestPrice('ask')}
+                className="text-trade-sell hover:underline"
+              >
+                Ask: {formatDisplayPrice(bestPrices.bestAsk)}
+              </button>
+            )}
+          </div>
         </div>
         <input
-          type="number"
+          type="text"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          placeholder="0.000000000000000"
-          className="input font-mono"
-          step="any"
-          min="0"
+          placeholder="0.0"
+          className="input-field w-full font-mono"
         />
       </div>
 
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="text-xs text-gray-500">Amount ({baseToken.symbol})</label>
-          <span className="text-xs text-gray-500">
-            Total:<span className="text-afrodex-orange font-mono ml-1">{totalDisplay}</span> {quoteToken.symbol}
-          </span>
+      {/* Amount Input */}
+      <div className="mb-3">
+        <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <span>Amount ({baseToken.symbol})</span>
         </div>
         <input
-          type="number"
+          type="text"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="0.0000"
-          className="input font-mono"
-          step="any"
-          min="0"
+          placeholder="0.0"
+          className="input-field w-full font-mono"
         />
       </div>
-        
-      <div className="flex gap-2 mb-4">
-        {[0.25, 0.5, 0.75, 1].map((pct) => (
-          <button
-            key={pct}
-            onClick={() => setPercentage(pct)}
-            className="flex-1 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-white/10 rounded transition-colors"
-          >
-            {pct * 100}%
-          </button>
-        ))}
+
+      {/* Total */}
+      <div className="mb-4 p-3 bg-afrodex-black-lighter rounded-lg">
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Total</span>
+          <span className="font-mono text-white">
+            {formatDisplayAmount(total)} {quoteToken.symbol}
+          </span>
+        </div>
       </div>
 
-      {matchingOrdersCount > 0 && (
-        <div className="flex items-center gap-2 p-2 bg-afrodex-orange/10 border border-afrodex-orange/20 rounded-lg mb-3 text-xs text-afrodex-orange">
-          <Zap className="w-3 h-3" />
-          <span>{matchingOrdersCount} matching order(s) will be executed first</span>
-        </div>
-      )}
-
+      {/* Error/Success Messages */}
       {error && (
-        <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg mb-3 text-xs text-red-400">
-          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-          <span>{error}</span>
+        <div className="mb-3 p-2 bg-red-500/10 border border-red-500/20 rounded text-red-400 text-xs">
+          {error}
         </div>
       )}
-
       {success && (
-        <div className="flex items-start gap-2 p-2 bg-green-500/10 border border-green-500/20 rounded-lg mb-3 text-xs text-green-400">
-          <CheckCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-          <span>{success}</span>
+        <div className="mb-3 p-2 bg-green-500/10 border border-green-500/20 rounded text-green-400 text-xs">
+          {success}
         </div>
       )}
 
-      {!isConnected ? (
-        <button className="w-full py-3 rounded-lg font-semibold text-sm bg-gray-700 text-gray-400" disabled>
-          Connect Wallet
-        </button>
-      ) : (
-        <button
-          onClick={handlePlaceOrder}
-          disabled={loading || !price || !amount || parseFloat(price) <= 0 || parseFloat(amount) <= 0}
-          className={`w-full py-3 rounded-lg font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-            isBuy 
-              ? 'bg-trade-buy/90 hover:bg-trade-buy text-black' 
-              : 'bg-trade-sell/90 hover:bg-trade-sell text-white'
-          }`}
-        >
-          {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {matchingOrdersCount > 0 ? 'Executing...' : 'Placing...'}
-            </span>
-          ) : (
-            `${isBuy ? 'Buy' : 'Sell'} ${baseToken.symbol}`
-          )}
-        </button>
-      )}
+      {/* Submit Button */}
+      <button
+        onClick={handleSubmit}
+        disabled={!isConnected || isSubmitting || !price || !amount}
+        className={`w-full py-3 rounded-lg font-semibold text-white transition-all flex items-center justify-center gap-2 ${
+          orderTab === 'buy'
+            ? 'bg-trade-buy hover:bg-trade-buy/80 disabled:bg-trade-buy/30'
+            : 'bg-trade-sell hover:bg-trade-sell/80 disabled:bg-trade-sell/30'
+        } disabled:cursor-not-allowed`}
+      >
+        {isSubmitting ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Processing...
+          </>
+        ) : !isConnected ? (
+          'Connect Wallet'
+        ) : (
+          `${orderTab === 'buy' ? 'Buy' : 'Sell'} ${baseToken.symbol}`
+        )}
+      </button>
+
+      {/* Info */}
+      <p className="text-[10px] text-gray-600 mt-2 text-center">
+        Orders are signed off-chain (gasless) and stored for matching
+      </p>
     </div>
   );
 }
