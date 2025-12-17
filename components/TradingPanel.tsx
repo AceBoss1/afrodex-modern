@@ -15,11 +15,13 @@ import {
   createSignedOrder,
   preTradeCheck,
   executeTrade,
+  getBalances,
   SignedOrder,
+  EXCHANGE_ADDRESS,
 } from '@/lib/exchange';
 import { Token, ZERO_ADDRESS } from '@/lib/tokens';
 import { saveSignedOrder, deactivateOrderByHash, saveTradeAfterExecution } from '@/lib/supabase';
-import { ArrowDownUp, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowDownUp, Loader2, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 
 interface TradingPanelProps {
   baseToken: Token;
@@ -38,6 +40,35 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  
+  // Balance state
+  const [ethBalance, setEthBalance] = useState('0');
+  const [tokenBalance, setTokenBalance] = useState('0');
+
+  // Fetch balances
+  useEffect(() => {
+    if (!address || !publicClient) return;
+    
+    const fetchBalances = async () => {
+      try {
+        const provider = new ethers.BrowserProvider(publicClient as any);
+        
+        // ETH balance on exchange
+        const ethBal = await getBalances(provider, ZERO_ADDRESS, address);
+        setEthBalance(formatAmount(ethBal.exchange, 18));
+        
+        // Token balance on exchange
+        const tokenBal = await getBalances(provider, baseToken.address, address);
+        setTokenBalance(formatAmount(tokenBal.exchange, baseToken.decimals));
+      } catch (err) {
+        console.error('Error fetching balances:', err);
+      }
+    };
+    
+    fetchBalances();
+    const interval = setInterval(fetchBalances, 15000);
+    return () => clearInterval(interval);
+  }, [address, publicClient, baseToken.address, baseToken.decimals]);
 
   // Update price when selected from order book
   useEffect(() => {
@@ -315,10 +346,24 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
 
   return (
     <div className="card">
-      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-        <ArrowDownUp className="w-4 h-4 text-afrodex-orange" />
-        Place Order
-      </h3>
+      {/* Header with balance */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <ArrowDownUp className="w-4 h-4 text-afrodex-orange" />
+          Place Order
+        </h3>
+        {isConnected && (
+          <div className="flex items-center gap-1 text-xs text-gray-400">
+            <Wallet className="w-3 h-3" />
+            <span className="font-mono">
+              {orderTab === 'buy' 
+                ? `${formatDisplayAmount(ethBalance)} ETH`
+                : `${formatDisplayAmount(tokenBalance)} ${baseToken.symbol}`
+              }
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* Buy/Sell Tabs */}
       <div className="flex gap-1 mb-4 p-1 bg-afrodex-black-lighter rounded-lg">
@@ -374,7 +419,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           placeholder="0.0"
-          className="input-field w-full font-mono"
+          className="w-full px-3 py-2 bg-afrodex-black-lighter border border-gray-700 rounded-lg text-white font-mono text-sm placeholder-gray-500 focus:outline-none focus:border-afrodex-orange"
         />
       </div>
 
@@ -388,7 +433,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.0"
-          className="input-field w-full font-mono"
+          className="w-full px-3 py-2 bg-afrodex-black-lighter border border-gray-700 rounded-lg text-white font-mono text-sm placeholder-gray-500 focus:outline-none focus:border-afrodex-orange"
         />
       </div>
 
