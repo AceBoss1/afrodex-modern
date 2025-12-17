@@ -1,7 +1,7 @@
 // lib/exchange.ts
 // Exchange contract interaction functions for AfroDex (EtherDelta/ForkDelta-style)
 
-import { ethers, Contract, Provider, Signer, BrowserProvider } from 'ethers';
+import { ethers, Contract, Provider, Signer } from 'ethers';
 import { EXCHANGE_ABI, ERC20_ABI } from './abi';
 import { ZERO_ADDRESS } from './tokens';
 
@@ -59,9 +59,6 @@ export interface Balance {
 // Formatting Functions
 // ============================================
 
-/**
- * Format amount from wei to human readable with full precision
- */
 export function formatAmount(amount: string | bigint, decimals: number): string {
   try {
     const value = typeof amount === 'string' ? BigInt(amount) : amount;
@@ -71,9 +68,6 @@ export function formatAmount(amount: string | bigint, decimals: number): string 
   }
 }
 
-/**
- * Parse amount from human readable to wei
- */
 export function parseAmount(amount: string, decimals: number): string {
   try {
     return ethers.parseUnits(amount, decimals).toString();
@@ -82,41 +76,23 @@ export function parseAmount(amount: string, decimals: number): string {
   }
 }
 
-/**
- * Format display amount - shows full precision for small numbers
- */
 export function formatDisplayAmount(amount: string | number): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(num) || num === 0) return '0';
   
   const absNum = Math.abs(num);
   
-  if (absNum >= 1000000) {
-    return num.toLocaleString('en-US', { maximumFractionDigits: 0 });
-  }
-  if (absNum >= 1000) {
-    return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  }
-  if (absNum >= 1) {
-    return num.toFixed(4);
-  }
-  if (absNum >= 0.0001) {
-    return num.toFixed(8);
-  }
-  if (absNum >= 0.00000001) {
-    return num.toFixed(12);
-  }
+  if (absNum >= 1000000) return num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (absNum >= 1000) return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (absNum >= 1) return num.toFixed(4);
+  if (absNum >= 0.0001) return num.toFixed(8);
+  if (absNum >= 0.00000001) return num.toFixed(12);
   return num.toFixed(15);
 }
 
-/**
- * Format display price with appropriate decimals
- */
 export function formatDisplayPrice(price: number): string {
   if (price === 0) return '0';
-  
   const absPrice = Math.abs(price);
-  
   if (absPrice >= 1) return price.toFixed(6);
   if (absPrice >= 0.0001) return price.toFixed(8);
   if (absPrice >= 0.000001) return price.toFixed(10);
@@ -124,14 +100,9 @@ export function formatDisplayPrice(price: number): string {
   return price.toFixed(15);
 }
 
-/**
- * Format order book price
- */
 export function formatOrderBookPrice(price: number): string {
   if (price === 0) return '0';
-  
   const absPrice = Math.abs(price);
-  
   if (absPrice >= 1) return price.toFixed(6);
   if (absPrice >= 0.0001) return price.toFixed(8);
   if (absPrice >= 0.000001) return price.toFixed(10);
@@ -139,32 +110,16 @@ export function formatOrderBookPrice(price: number): string {
   return price.toFixed(15);
 }
 
-/**
- * Format order book amount
- */
 export function formatOrderBookAmount(amount: number): string {
   if (amount === 0) return '0';
-  
   const absAmount = Math.abs(amount);
-  
-  if (absAmount >= 1000000) {
-    return Math.round(amount).toLocaleString('en-US', { maximumFractionDigits: 0 });
-  }
-  if (absAmount >= 1000) {
-    return amount.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  }
-  if (absAmount >= 1) {
-    return amount.toFixed(4);
-  }
-  if (absAmount >= 0.0001) {
-    return amount.toFixed(8);
-  }
+  if (absAmount >= 1000000) return Math.round(amount).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (absAmount >= 1000) return amount.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (absAmount >= 1) return amount.toFixed(4);
+  if (absAmount >= 0.0001) return amount.toFixed(8);
   return amount.toFixed(12);
 }
 
-/**
- * Format full balance without abbreviation
- */
 export function formatFullBalance(amount: string | number): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(num) || num === 0) return '0';
@@ -175,9 +130,6 @@ export function formatFullBalance(amount: string | number): string {
 // Token Info Functions
 // ============================================
 
-/**
- * Get token info from contract
- */
 export async function getTokenInfo(
   provider: Provider,
   tokenAddress: string
@@ -197,9 +149,6 @@ export async function getTokenInfo(
 // Balance Functions
 // ============================================
 
-/**
- * Get wallet and exchange balances for a token
- */
 export async function getBalances(
   provider: Provider,
   tokenAddress: string,
@@ -211,11 +160,9 @@ export async function getBalances(
   let exchangeBalance: bigint;
   
   if (tokenAddress === ZERO_ADDRESS) {
-    // ETH balances
     walletBalance = await provider.getBalance(userAddress);
     exchangeBalance = await exchange.balanceOf(ZERO_ADDRESS, userAddress);
   } else {
-    // Token balances
     const token = new Contract(tokenAddress, ERC20_ABI, provider);
     walletBalance = await token.balanceOf(userAddress);
     exchangeBalance = await exchange.balanceOf(tokenAddress, userAddress);
@@ -227,9 +174,6 @@ export async function getBalances(
   };
 }
 
-/**
- * Check token allowance for exchange
- */
 export async function checkAllowance(
   provider: Provider,
   tokenAddress: string,
@@ -246,9 +190,6 @@ export async function checkAllowance(
 // Deposit/Withdraw Functions
 // ============================================
 
-/**
- * Approve token for exchange
- */
 export async function approveToken(
   signer: Signer,
   tokenAddress: string,
@@ -258,9 +199,6 @@ export async function approveToken(
   return await token.approve(EXCHANGE_ADDRESS, amount);
 }
 
-/**
- * Deposit ETH to exchange
- */
 export async function depositEth(
   signer: Signer,
   amount: string
@@ -269,9 +207,6 @@ export async function depositEth(
   return await exchange.deposit({ value: amount });
 }
 
-/**
- * Withdraw ETH from exchange
- */
 export async function withdrawEth(
   signer: Signer,
   amount: string
@@ -280,9 +215,6 @@ export async function withdrawEth(
   return await exchange.withdraw(amount);
 }
 
-/**
- * Deposit token to exchange
- */
 export async function depositToken(
   signer: Signer,
   tokenAddress: string,
@@ -292,9 +224,6 @@ export async function depositToken(
   return await exchange.depositToken(tokenAddress, amount);
 }
 
-/**
- * Withdraw token from exchange
- */
 export async function withdrawToken(
   signer: Signer,
   tokenAddress: string,
@@ -308,19 +237,13 @@ export async function withdrawToken(
 // Order Functions
 // ============================================
 
-/**
- * Generate a random nonce for orders
- */
 export function generateNonce(): string {
   return Math.floor(Math.random() * 1000000000000).toString();
 }
 
-/**
- * Get expiration block (current block + offset)
- */
 export async function getExpirationBlock(
   provider: Provider,
-  blockOffset: number = 10000
+  blockOffset: number = 100000
 ): Promise<string> {
   const currentBlock = await provider.getBlockNumber();
   return (currentBlock + blockOffset).toString();
@@ -328,6 +251,7 @@ export async function getExpirationBlock(
 
 /**
  * Calculate order hash for EtherDelta-style exchange
+ * CRITICAL: EtherDelta uses SHA256, not keccak256!
  */
 export function calculateOrderHash(
   tokenGet: string,
@@ -335,13 +259,16 @@ export function calculateOrderHash(
   tokenGive: string,
   amountGive: string,
   expires: string,
-  nonce: string,
-  user: string
+  nonce: string
 ): string {
-  return ethers.solidityPackedKeccak256(
+  // EtherDelta hash format: sha256(contractAddress, tokenGet, amountGet, tokenGive, amountGive, expires, nonce)
+  const packed = ethers.solidityPacked(
     ['address', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
     [EXCHANGE_ADDRESS, tokenGet, amountGet, tokenGive, amountGive, expires, nonce]
   );
+  
+  // Use SHA256 - this is what EtherDelta contracts use!
+  return ethers.sha256(packed);
 }
 
 /**
@@ -358,20 +285,34 @@ export async function createSignedOrder(
 ): Promise<SignedOrder> {
   const user = await signer.getAddress();
   
-  // Calculate order hash
+  // Calculate order hash using SHA256 (EtherDelta style)
   const hash = calculateOrderHash(
     tokenGet,
     amountGet,
     tokenGive,
     amountGive,
     expires,
-    nonce,
-    user
+    nonce
   );
   
-  // Sign the hash with eth_sign (prefixed message)
+  console.log('=== CREATING SIGNED ORDER ===');
+  console.log('Contract:', EXCHANGE_ADDRESS);
+  console.log('tokenGet:', tokenGet);
+  console.log('amountGet:', amountGet);
+  console.log('tokenGive:', tokenGive);
+  console.log('amountGive:', amountGive);
+  console.log('expires:', expires);
+  console.log('nonce:', nonce);
+  console.log('Order hash (SHA256):', hash);
+  
+  // Sign the hash - eth_sign adds the Ethereum message prefix
   const signature = await signer.signMessage(ethers.getBytes(hash));
   const sig = ethers.Signature.from(signature);
+  
+  console.log('Signature v:', sig.v);
+  console.log('Signature r:', sig.r);
+  console.log('Signature s:', sig.s);
+  console.log('=============================');
   
   return {
     tokenGet,
@@ -388,9 +329,6 @@ export async function createSignedOrder(
   };
 }
 
-/**
- * Calculate order price from amounts
- */
 export function calculateOrderPrice(
   order: Order,
   baseDecimals: number,
@@ -414,37 +352,24 @@ export function calculateOrderPrice(
 // Trade Functions
 // ============================================
 
-/**
- * Pre-trade check - verify order can be executed
- */
 export async function preTradeCheck(
   provider: Provider,
   order: SignedOrder,
   amount: string,
   takerAddress: string
-): Promise<{ canTrade: boolean; reason?: string }> {
+): Promise<{ canTrade: boolean; reason?: string; availableVolume?: string }> {
   try {
     const exchange = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
     
-    // Check if order is valid using testTrade
-    const canTrade = await exchange.testTrade(
-      order.tokenGet,
-      order.amountGet,
-      order.tokenGive,
-      order.amountGive,
-      order.expires,
-      order.nonce,
-      order.user,
-      order.v,
-      order.r,
-      order.s,
-      amount,
-      takerAddress
-    );
+    console.log('=== PRE-TRADE CHECK ===');
+    console.log('Order hash:', order.hash);
+    console.log('Trade amount:', amount);
+    console.log('Taker:', takerAddress);
     
-    if (!canTrade) {
-      // Check available volume
-      const available = await exchange.availableVolume(
+    // First check available volume
+    let available: bigint;
+    try {
+      available = await exchange.availableVolume(
         order.tokenGet,
         order.amountGet,
         order.tokenGive,
@@ -456,30 +381,64 @@ export async function preTradeCheck(
         order.r,
         order.s
       );
-      
-      if (BigInt(available) === 0n) {
-        return { canTrade: false, reason: 'Order already filled or cancelled' };
-      }
-      
-      return { canTrade: false, reason: 'Trade validation failed' };
+      console.log('Available volume:', available.toString());
+    } catch (err: any) {
+      console.error('availableVolume error:', err);
+      return { canTrade: false, reason: 'Failed to check volume: ' + (err.reason || err.message) };
     }
     
-    return { canTrade: true };
+    if (available === 0n) {
+      return { canTrade: false, reason: 'Order filled/cancelled (0 available)' };
+    }
+    
+    // Check if order is valid using testTrade
+    let canTrade: boolean;
+    try {
+      canTrade = await exchange.testTrade(
+        order.tokenGet,
+        order.amountGet,
+        order.tokenGive,
+        order.amountGive,
+        order.expires,
+        order.nonce,
+        order.user,
+        order.v,
+        order.r,
+        order.s,
+        amount,
+        takerAddress
+      );
+      console.log('testTrade result:', canTrade);
+    } catch (err: any) {
+      console.error('testTrade error:', err);
+      return { canTrade: false, reason: 'Trade test failed: ' + (err.reason || err.message) };
+    }
+    
+    if (!canTrade) {
+      const currentBlock = await provider.getBlockNumber();
+      if (BigInt(order.expires) < BigInt(currentBlock)) {
+        return { canTrade: false, reason: `Order expired (block ${order.expires} < ${currentBlock})` };
+      }
+      return { canTrade: false, reason: 'Validation failed - check balances' };
+    }
+    
+    console.log('=== PRE-TRADE CHECK PASSED ===');
+    return { canTrade: true, availableVolume: available.toString() };
   } catch (err: any) {
     console.error('Pre-trade check error:', err);
     return { canTrade: false, reason: err.reason || err.message || 'Unknown error' };
   }
 }
 
-/**
- * Execute a trade against an existing order
- */
 export async function executeTrade(
   signer: Signer,
   order: SignedOrder,
   amount: string
 ): Promise<ethers.ContractTransactionResponse> {
   const exchange = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, signer);
+  
+  console.log('=== EXECUTING TRADE ===');
+  console.log('Amount:', amount);
   
   return await exchange.trade(
     order.tokenGet,
@@ -496,9 +455,6 @@ export async function executeTrade(
   );
 }
 
-/**
- * Cancel an order on-chain
- */
 export async function cancelOrder(
   signer: Signer,
   order: SignedOrder
@@ -518,9 +474,6 @@ export async function cancelOrder(
   );
 }
 
-/**
- * Get available volume for an order
- */
 export async function getAvailableVolume(
   provider: Provider,
   order: SignedOrder
@@ -543,9 +496,6 @@ export async function getAvailableVolume(
   return volume.toString();
 }
 
-/**
- * Get amount filled for an order
- */
 export async function getAmountFilled(
   provider: Provider,
   order: SignedOrder
