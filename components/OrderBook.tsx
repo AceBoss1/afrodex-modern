@@ -15,12 +15,29 @@ interface OrderBookProps {
   quoteToken: Token;
 }
 
+interface OrderData {
+  tokenGet: string;
+  amountGet: string;
+  tokenGive: string;
+  amountGive: string;
+  expires: string;
+  nonce: string;
+  user: string;
+  side?: 'buy' | 'sell';
+  price?: number;
+  v?: number;
+  r?: string;
+  s?: string;
+  hash?: string;
+  availableVolume?: string;
+}
+
 interface AggregatedOrder {
   price: number;
   amount: number;
   total: number;
   depth: number;
-  orders: typeof useTradingStore.getState().buyOrders; // Array of individual orders at this price
+  orders: OrderData[];
 }
 
 export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
