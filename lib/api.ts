@@ -1,300 +1,301 @@
 // lib/api.ts
-import { ethers, Contract, Provider } from 'ethers';
-import { EXCHANGE_ADDRESS, Order, Trade, calculateOrderPrice, formatAmount } from './exchange';
-import { EXCHANGE_ABI } from './abi';
+// API functions for fetching orders and trades from Supabase
+
+import { 
+  getOrdersFromDb, 
+  getTradesFromDb, 
+  DbOrder, 
+  DbTrade,
+  getSupabaseClient,
+} from './supabase';
+import { EXCHANGE_ADDRESS, formatAmount, calculateOrderPrice } from './exchange';
 import { Token, ZERO_ADDRESS } from './tokens';
-import { isSupabaseConfigured, getOrdersFromDb, getTradesFromDb, DbOrder, DbTrade } from './supabase';
 
-// Cache for fetched data
-const orderCache = new Map<string, { orders: { buyOrders: Order[]; sellOrders: Order[] }; timestamp: number }>();
-const tradeCache = new Map<string, { trades: Trade[]; timestamp: number }>();
-const CACHE_DURATION = 30000; // 30 seconds
+export interface ProcessedOrder {
+  tokenGet: string;
+  amountGet: string;
+  tokenGive: string;
+  amountGive: string;
+  expires: string;
+  nonce: string;
+  user: string;
+  side: 'buy' | 'sell';
+  price: number;
+  availableVolume?: string;
+  amountFilled?: string;
+  v?: number;
+  r?: string;
+  s?: string;
+  hash?: string;
+}
 
-function getCacheKey(baseToken: Token, quoteToken: Token): string {
-  return `${baseToken.address.toLowerCase()}-${quoteToken.address.toLowerCase()}`;
+export interface ProcessedTrade {
+  txHash: string;
+  blockNumber: number;
+  timestamp: number;
+  tokenGet: string;
+  amountGet: string;
+  tokenGive: string;
+  amountGive: string;
+  maker: string;
+  taker: string;
+  price: number;
+  side: 'buy' | 'sell';
+  baseAmount: number;
+  quoteAmount: number;
 }
 
 /**
- * Convert DB order to Order type
- */
-function dbOrderToOrder(dbOrder: DbOrder, baseToken: Token, quoteToken: Token): Order {
-  console.log('=== LOADING ORDER FROM DB ===');
-  console.log('DB v:', dbOrder.v, 'type:', typeof dbOrder.v);
-  console.log('DB r:', dbOrder.r, 'length:', dbOrder.r?.length);
-  console.log('DB s:', dbOrder.s, 'length:', dbOrder.s?.length);
-  console.log('DB hash:', dbOrder.order_hash);
-  console.log('=============================');
-  
-  return {
-    tokenGet: dbOrder.token_get,
-    amountGet: dbOrder.amount_get,
-    tokenGive: dbOrder.token_give,
-    amountGive: dbOrder.amount_give,
-    expires: dbOrder.expires,
-    nonce: dbOrder.nonce,
-    user: dbOrder.user_address,
-    availableVolume: dbOrder.amount_get,
-    amountFilled: dbOrder.amount_filled || '0',
-    side: dbOrder.side,
-    price: dbOrder.price,
-    // Include signature fields for trade execution (ensure proper types)
-    v: dbOrder.v !== undefined && dbOrder.v !== null ? Number(dbOrder.v) : undefined,
-    r: dbOrder.r || undefined,
-    s: dbOrder.s || undefined,
-    hash: dbOrder.order_hash || undefined,
-  };
-}
-
-/**
- * Convert DB trade to Trade type
- */
-function dbTradeToTrade(dbTrade: DbTrade): Trade {
-  return {
-    txHash: dbTrade.tx_hash,
-    blockNumber: dbTrade.block_number,
-    timestamp: dbTrade.block_timestamp ? new Date(dbTrade.block_timestamp).getTime() / 1000 : Date.now() / 1000,
-    tokenGet: dbTrade.token_get,
-    amountGet: dbTrade.amount_get,
-    tokenGive: dbTrade.token_give,
-    amountGive: dbTrade.amount_give,
-    maker: dbTrade.maker,
-    taker: dbTrade.taker,
-    price: dbTrade.price,
-    side: dbTrade.side,
-    baseAmount: dbTrade.base_amount,
-    quoteAmount: dbTrade.quote_amount,
-  };
-}
-
-/**
- * Fetch orders from Supabase (off-chain orderbook - no blockchain fallback)
+ * Fetch orders from Supabase
  */
 export async function fetchOrders(
-  provider: Provider,
   baseToken: Token,
-  quoteToken: Token,
-  useCache: boolean = true
-): Promise<{ buyOrders: Order[]; sellOrders: Order[] }> {
-  const cacheKey = getCacheKey(baseToken, quoteToken);
+  quoteToken: Token
+): Promise<{ buyOrders: ProcessedOrder[]; sellOrders: ProcessedOrder[] }> {
+  console.log('Fetching orders from Supabase...');
   
-  if (useCache) {
-    const cached = orderCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      return cached.orders;
+  const orders = await getOrdersFromDb(baseToken.address, quoteToken.address);
+  
+  const buyOrders: ProcessedOrder[] = [];
+  const sellOrders: ProcessedOrder[] = [];
+
+  for (const order of orders) {
+    // Debug logging for signature verification
+    console.log('=== LOADING ORDER FROM DB ===');
+    console.log('DB v:', order.v, 'type:', typeof order.v);
+    console.log('DB r:', order.r, 'length:', order.r?.length);
+    console.log('DB s:', order.s, 'length:', order.s?.length);
+    console.log('DB hash:', order.order_hash);
+    console.log('=============================');
+
+    const processed: ProcessedOrder = {
+      tokenGet: order.token_get,
+      amountGet: order.amount_get,
+      tokenGive: order.token_give,
+      amountGive: order.amount_give,
+      expires: order.expires,
+      nonce: order.nonce,
+      user: order.user_address,
+      side: order.side,
+      price: order.price,
+      availableVolume: order.amount_get,
+      amountFilled: order.amount_filled,
+      v: order.v,
+      r: order.r,
+      s: order.s,
+      hash: order.order_hash,
+    };
+
+    if (order.side === 'buy') {
+      buyOrders.push(processed);
+    } else {
+      sellOrders.push(processed);
     }
   }
 
-  // Off-chain orderbook - only use Supabase
-  if (isSupabaseConfigured()) {
-    try {
-      console.log('Fetching orders from Supabase...');
-      const dbOrders = await getOrdersFromDb(baseToken.address, ZERO_ADDRESS);
-      
-      const buyOrders: Order[] = [];
-      const sellOrders: Order[] = [];
-      
-      for (const dbOrder of dbOrders) {
-        const order = dbOrderToOrder(dbOrder, baseToken, quoteToken);
-        if (dbOrder.side === 'buy') {
-          buyOrders.push(order);
-        } else {
-          sellOrders.push(order);
-        }
-      }
-      
-      const sortedBuyOrders = buyOrders.sort((a, b) => (b.price || 0) - (a.price || 0));
-      const sortedSellOrders = sellOrders.sort((a, b) => (a.price || 0) - (b.price || 0));
-      
-      console.log(`Got ${sortedBuyOrders.length} buy, ${sortedSellOrders.length} sell orders from Supabase`);
-      
-      const result = { buyOrders: sortedBuyOrders, sellOrders: sortedSellOrders };
-      orderCache.set(cacheKey, { orders: result, timestamp: Date.now() });
-      return result;
-    } catch (err) {
-      console.error('Error fetching orders from Supabase:', err);
-    }
-  } else {
-    console.log('Supabase not configured - no orders available');
-  }
-
-  // Return empty if Supabase fails (off-chain orderbook doesn't use blockchain)
-  return { buyOrders: [], sellOrders: [] };
+  console.log(`Got ${buyOrders.length} buy, ${sellOrders.length} sell orders from Supabase`);
+  return { buyOrders, sellOrders };
 }
 
 /**
- * Fetch trades from Supabase (no blockchain fallback - saves RPC calls)
+ * Fetch trades from Supabase
  */
 export async function fetchTrades(
-  provider: Provider,
   baseToken: Token,
-  quoteToken: Token,
-  limit: number = 100,
-  useCache: boolean = true
-): Promise<Trade[]> {
-  const cacheKey = getCacheKey(baseToken, quoteToken);
+  quoteToken: Token
+): Promise<ProcessedTrade[]> {
+  console.log('Fetching trades from Supabase...');
   
-  if (useCache) {
-    const cached = tradeCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      return cached.trades;
-    }
-  }
+  const trades = await getTradesFromDb(baseToken.address, quoteToken.address);
+  
+  const processed = trades.map((trade: DbTrade) => ({
+    txHash: trade.tx_hash,
+    blockNumber: trade.block_number,
+    timestamp: trade.block_timestamp ? new Date(trade.block_timestamp).getTime() / 1000 : Date.now() / 1000,
+    tokenGet: trade.token_get,
+    amountGet: trade.amount_get,
+    tokenGive: trade.token_give,
+    amountGive: trade.amount_give,
+    maker: trade.maker,
+    taker: trade.taker,
+    price: trade.price,
+    side: trade.side,
+    baseAmount: trade.base_amount,
+    quoteAmount: trade.quote_amount,
+  }));
 
-  // Use Supabase for trade history (no blockchain fallback to avoid RPC limits)
-  if (isSupabaseConfigured()) {
-    try {
-      console.log('Fetching trades from Supabase...');
-      const dbTrades = await getTradesFromDb(baseToken.address, ZERO_ADDRESS, limit);
-      
-      const trades = dbTrades.map(dbTradeToTrade);
-      console.log(`Got ${trades.length} trades from Supabase`);
-      tradeCache.set(cacheKey, { trades, timestamp: Date.now() });
-      return trades;
-    } catch (err) {
-      console.error('Error fetching trades from Supabase:', err);
-    }
-  } else {
-    console.log('Supabase not configured - no trade history available');
-  }
-
-  // Return empty if Supabase fails (avoids RPC rate limits)
-  return [];
+  console.log(`Got ${processed.length} trades from Supabase`);
+  return processed;
 }
 
 /**
- * Subscribe to new trades (real-time updates)
+ * Subscribe to trades using Supabase realtime (no eth filters)
  */
 export function subscribeToTrades(
-  provider: Provider,
   baseToken: Token,
   quoteToken: Token,
-  onTrade: (trade: Trade) => void
+  callback: (trade: ProcessedTrade) => void
 ): () => void {
-  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
-  
-  const handleTrade = async (
-    tokenGet: string,
-    amountGet: bigint,
-    tokenGive: string,
-    amountGive: bigint,
-    maker: string,
-    taker: string,
-    event: any
-  ) => {
-    // Check if trade is for our pair
-    const isBaseGet = tokenGet.toLowerCase() === baseToken.address.toLowerCase();
-    const isQuoteGet = tokenGet.toLowerCase() === quoteToken.address.toLowerCase();
-    const isBaseGive = tokenGive.toLowerCase() === baseToken.address.toLowerCase();
-    const isQuoteGive = tokenGive.toLowerCase() === quoteToken.address.toLowerCase();
-    
-    if (!((isBaseGet && isQuoteGive) || (isQuoteGet && isBaseGive))) return;
-    
-    try {
-      const block = await provider.getBlock(event.log.blockNumber);
-      const isBuy = isBaseGet;
-      
-      const baseAmount = parseFloat(formatAmount(
-        (isBuy ? amountGet : amountGive).toString(),
-        baseToken.decimals
-      ));
-      const quoteAmount = parseFloat(formatAmount(
-        (isBuy ? amountGive : amountGet).toString(),
-        quoteToken.decimals
-      ));
-      
-      const price = baseAmount > 0 ? quoteAmount / baseAmount : 0;
-      
-      onTrade({
-        txHash: event.log.transactionHash,
-        blockNumber: event.log.blockNumber,
-        timestamp: block?.timestamp ? Number(block.timestamp) : Math.floor(Date.now() / 1000),
-        tokenGet,
-        amountGet: amountGet.toString(),
-        tokenGive,
-        amountGive: amountGive.toString(),
-        maker,
-        taker,
-        price,
-        side: isBuy ? 'buy' : 'sell',
-        baseAmount,
-        quoteAmount,
-      });
-    } catch (error) {
-      console.error('Error processing trade event:', error);
-    }
-  };
-  
-  contract.on('Trade', handleTrade);
-  
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    console.log('Supabase not configured, skipping trade subscription');
+    return () => {};
+  }
+
+  const channel = supabase
+    .channel('trades-realtime')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'trades',
+        filter: `base_token=eq.${baseToken.address.toLowerCase()}`,
+      },
+      (payload) => {
+        const trade = payload.new as DbTrade;
+        callback({
+          txHash: trade.tx_hash,
+          blockNumber: trade.block_number,
+          timestamp: trade.block_timestamp ? new Date(trade.block_timestamp).getTime() / 1000 : Date.now() / 1000,
+          tokenGet: trade.token_get,
+          amountGet: trade.amount_get,
+          tokenGive: trade.token_give,
+          amountGive: trade.amount_give,
+          maker: trade.maker,
+          taker: trade.taker,
+          price: trade.price,
+          side: trade.side,
+          baseAmount: trade.base_amount,
+          quoteAmount: trade.quote_amount,
+        });
+      }
+    )
+    .subscribe();
+
   return () => {
-    contract.off('Trade', handleTrade);
+    supabase.removeChannel(channel);
   };
 }
 
 /**
- * Subscribe to new orders
+ * Subscribe to orders using Supabase realtime (no eth filters)
  */
 export function subscribeToOrders(
-  provider: Provider,
   baseToken: Token,
   quoteToken: Token,
-  onOrder: (order: Order, side: 'buy' | 'sell') => void
+  callback: (order: ProcessedOrder) => void
 ): () => void {
-  const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
-  
-  const handleOrder = (
-    tokenGet: string,
-    amountGet: bigint,
-    tokenGive: string,
-    amountGive: bigint,
-    expires: bigint,
-    nonce: bigint,
-    user: string
-  ) => {
-    // Check if order is for our pair
-    const isBuyOrder = 
-      tokenGet.toLowerCase() === baseToken.address.toLowerCase() &&
-      tokenGive.toLowerCase() === quoteToken.address.toLowerCase();
-      
-    const isSellOrder = 
-      tokenGet.toLowerCase() === quoteToken.address.toLowerCase() &&
-      tokenGive.toLowerCase() === baseToken.address.toLowerCase();
-    
-    if (!isBuyOrder && !isSellOrder) return;
-    
-    const order: Order = {
-      tokenGet,
-      amountGet: amountGet.toString(),
-      tokenGive,
-      amountGive: amountGive.toString(),
-      expires: expires.toString(),
-      nonce: nonce.toString(),
-      user,
-      availableVolume: amountGet.toString(),
-      side: isBuyOrder ? 'buy' : 'sell',
-    };
-    
-    order.price = calculateOrderPrice(
-      order,
-      baseToken.decimals,
-      quoteToken.decimals,
-      baseToken.address
-    );
-    
-    onOrder(order, isBuyOrder ? 'buy' : 'sell');
-  };
-  
-  contract.on('Order', handleOrder);
-  
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    console.log('Supabase not configured, skipping order subscription');
+    return () => {};
+  }
+
+  const channel = supabase
+    .channel('orders-realtime')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'orders',
+        filter: `base_token=eq.${baseToken.address.toLowerCase()}`,
+      },
+      (payload) => {
+        const order = payload.new as DbOrder;
+        if (!order.v || !order.r || !order.s) return; // Skip invalid orders
+        
+        callback({
+          tokenGet: order.token_get,
+          amountGet: order.amount_get,
+          tokenGive: order.token_give,
+          amountGive: order.amount_give,
+          expires: order.expires,
+          nonce: order.nonce,
+          user: order.user_address,
+          side: order.side,
+          price: order.price,
+          availableVolume: order.amount_get,
+          amountFilled: order.amount_filled,
+          v: order.v,
+          r: order.r,
+          s: order.s,
+          hash: order.order_hash,
+        });
+      }
+    )
+    .subscribe();
+
   return () => {
-    contract.off('Order', handleOrder);
+    supabase.removeChannel(channel);
   };
 }
 
 /**
- * Clear all caches
+ * Poll for order updates (fallback when realtime doesn't work)
  */
-export function clearCaches(): void {
-  orderCache.clear();
-  tradeCache.clear();
+export function startOrderPolling(
+  baseToken: Token,
+  quoteToken: Token,
+  onUpdate: (buyOrders: ProcessedOrder[], sellOrders: ProcessedOrder[]) => void,
+  intervalMs: number = 10000
+): () => void {
+  let isActive = true;
+
+  const poll = async () => {
+    if (!isActive) return;
+    
+    try {
+      const { buyOrders, sellOrders } = await fetchOrders(baseToken, quoteToken);
+      onUpdate(buyOrders, sellOrders);
+    } catch (err) {
+      console.error('Order polling error:', err);
+    }
+    
+    if (isActive) {
+      setTimeout(poll, intervalMs);
+    }
+  };
+
+  // Start polling
+  poll();
+
+  return () => {
+    isActive = false;
+  };
+}
+
+/**
+ * Poll for trade updates (fallback when realtime doesn't work)
+ */
+export function startTradePolling(
+  baseToken: Token,
+  quoteToken: Token,
+  onUpdate: (trades: ProcessedTrade[]) => void,
+  intervalMs: number = 15000
+): () => void {
+  let isActive = true;
+
+  const poll = async () => {
+    if (!isActive) return;
+    
+    try {
+      const trades = await fetchTrades(baseToken, quoteToken);
+      onUpdate(trades);
+    } catch (err) {
+      console.error('Trade polling error:', err);
+    }
+    
+    if (isActive) {
+      setTimeout(poll, intervalMs);
+    }
+  };
+
+  // Start polling
+  poll();
+
+  return () => {
+    isActive = false;
+  };
 }
