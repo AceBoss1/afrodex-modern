@@ -144,12 +144,21 @@ export async function fetchTrades(
 
 /**
  * Subscribe to trades using Supabase realtime (no eth filters)
+ * @param providerOrBaseToken - Provider (ignored) or baseToken
+ * @param baseTokenOrQuoteToken - baseToken or quoteToken  
+ * @param quoteTokenOrCallback - quoteToken or callback
+ * @param callbackOptional - callback if 4 args
  */
 export function subscribeToTrades(
-  baseToken: Token,
-  quoteToken: Token,
-  callback: (trade: ProcessedTrade) => void
+  providerOrBaseToken: any,
+  baseTokenOrQuoteToken: Token,
+  quoteTokenOrCallback: Token | ((trade: ProcessedTrade) => void),
+  callbackOptional?: (trade: ProcessedTrade) => void
 ): () => void {
+  // Handle both 3-arg and 4-arg calls
+  const baseToken: Token = callbackOptional ? baseTokenOrQuoteToken : providerOrBaseToken;
+  const quoteToken: Token = callbackOptional ? (quoteTokenOrCallback as Token) : baseTokenOrQuoteToken;
+  const callback = callbackOptional || (quoteTokenOrCallback as (trade: ProcessedTrade) => void);
   const supabase = getSupabaseClient();
   if (!supabase) {
     console.log('Supabase not configured, skipping trade subscription');
@@ -194,12 +203,21 @@ export function subscribeToTrades(
 
 /**
  * Subscribe to orders using Supabase realtime (no eth filters)
+ * @param providerOrBaseToken - Provider (ignored) or baseToken
+ * @param baseTokenOrQuoteToken - baseToken or quoteToken  
+ * @param quoteTokenOrCallback - quoteToken or callback
+ * @param callbackOptional - callback if 4 args
  */
 export function subscribeToOrders(
-  baseToken: Token,
-  quoteToken: Token,
-  callback: (order: ProcessedOrder) => void
+  providerOrBaseToken: any,
+  baseTokenOrQuoteToken: Token,
+  quoteTokenOrCallback: Token | ((order: ProcessedOrder) => void),
+  callbackOptional?: (order: ProcessedOrder) => void
 ): () => void {
+  // Handle both 3-arg and 4-arg calls
+  const baseToken: Token = callbackOptional ? baseTokenOrQuoteToken : providerOrBaseToken;
+  const quoteToken: Token = callbackOptional ? (quoteTokenOrCallback as Token) : baseTokenOrQuoteToken;
+  const callback = callbackOptional || (quoteTokenOrCallback as (order: ProcessedOrder) => void);
   const supabase = getSupabaseClient();
   if (!supabase) {
     console.log('Supabase not configured, skipping order subscription');
