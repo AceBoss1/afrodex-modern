@@ -211,13 +211,13 @@ export function subscribeToTrades(
 export function subscribeToOrders(
   providerOrBaseToken: any,
   baseTokenOrQuoteToken: Token,
-  quoteTokenOrCallback: Token | ((order: ProcessedOrder, side?: 'buy' | 'sell') => void),
-  callbackOptional?: (order: ProcessedOrder, side?: 'buy' | 'sell') => void
+  quoteTokenOrCallback: Token | ((order: ProcessedOrder, side: 'buy' | 'sell') => void),
+  callbackOptional?: (order: ProcessedOrder, side: 'buy' | 'sell') => void
 ): () => void {
   // Handle both 3-arg and 4-arg calls
   const baseToken: Token = callbackOptional ? baseTokenOrQuoteToken : providerOrBaseToken;
   const quoteToken: Token = callbackOptional ? (quoteTokenOrCallback as Token) : baseTokenOrQuoteToken;
-  const callback = callbackOptional || (quoteTokenOrCallback as (order: ProcessedOrder, side?: 'buy' | 'sell') => void);
+  const callback = callbackOptional || (quoteTokenOrCallback as (order: ProcessedOrder, side: 'buy' | 'sell') => void);
   const supabase = getSupabaseClient();
   if (!supabase) {
     console.log('Supabase not configured, skipping order subscription');
@@ -237,6 +237,7 @@ export function subscribeToOrders(
       (payload) => {
         const order = payload.new as DbOrder;
         if (!order.v || !order.r || !order.s) return; // Skip invalid orders
+        if (!order.side) return; // Skip orders without side
         
         callback({
           tokenGet: order.token_get,
@@ -254,7 +255,7 @@ export function subscribeToOrders(
           r: order.r,
           s: order.s,
           hash: order.order_hash,
-        }, order.side);
+        }, order.side as 'buy' | 'sell');
       }
     )
     .subscribe();
