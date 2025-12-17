@@ -285,7 +285,7 @@ export default function TradingPanel({ baseToken, quoteToken }: TradingPanelProp
         r: signedOrder.r,
         s: signedOrder.s,
         hash: signedOrder.hash,
-      });
+      }, orderTab);
 
       setSuccess('Order placed successfully!');
       setPrice('');
