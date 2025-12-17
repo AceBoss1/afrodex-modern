@@ -1,11 +1,12 @@
 // components/Sidebar.tsx
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAccount } from 'wagmi';
+import { useAccount, usePublicClient } from 'wagmi';
 import { useWeb3Modal } from '@web3modal/wagmi/react';
 import Image from 'next/image';
+import { ethers } from 'ethers';
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,6 +17,8 @@ import {
   Wallet,
   ExternalLink,
   AlertCircle,
+  Mail,
+  Trophy,
 } from 'lucide-react';
 import { useUIStore, useCustomTokensStore, useFavoritesStore, useTradingStore } from '@/lib/store';
 import {
@@ -27,8 +30,7 @@ import {
   createCustomToken,
 } from '@/lib/tokens';
 import { getTokenInfo } from '@/lib/exchange';
-import { usePublicClient } from 'wagmi';
-import { ethers } from 'ethers';
+import { getStakeInfo, getBadgeTier, formatStakedAmount, BadgeTier } from '@/lib/staking';
 
 export default function Sidebar() {
   const router = useRouter();
@@ -47,6 +49,37 @@ export default function Sidebar() {
   const [isLoadingToken, setIsLoadingToken] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'favorites'>('all');
+  
+  // Badge state
+  const [userBadge, setUserBadge] = useState<BadgeTier | null>(null);
+  const [stakedAmount, setStakedAmount] = useState<number>(0);
+
+  // Fetch user's badge tier
+  useEffect(() => {
+    const fetchBadge = async () => {
+      if (!address || !publicClient) {
+        setUserBadge(null);
+        setStakedAmount(0);
+        return;
+      }
+      
+      try {
+        const provider = new ethers.BrowserProvider(publicClient as any);
+        const stakeInfo = await getStakeInfo(provider, address);
+        const badge = getBadgeTier(stakeInfo.stakeBalanceFormatted);
+        setUserBadge(badge);
+        setStakedAmount(stakeInfo.stakeBalanceFormatted);
+      } catch (err) {
+        console.error('Error fetching badge:', err);
+        setUserBadge(null);
+      }
+    };
+    
+    fetchBadge();
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [address, publicClient]);
 
   // Combine official and custom tokens
   const allTokens = useMemo(() => {
@@ -209,7 +242,7 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Wallet Connection */}
+      {/* Wallet Connection with Badge */}
       <div className="p-4 border-b border-white/5">
         {isConnected && address ? (
           <button
@@ -228,6 +261,21 @@ export default function Sidebar() {
               </div>
               <ExternalLink className="w-4 h-4 text-gray-500 group-hover:text-afrodex-orange transition-colors" />
             </div>
+            
+            {/* Badge Display */}
+            {userBadge && (
+              <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{userBadge.emoji}</span>
+                  <span className="text-xs text-gray-400">{userBadge.name}</span>
+                </div>
+                {stakedAmount > 0 && (
+                  <span className="text-[10px] text-gray-500">
+                    {formatStakedAmount(stakedAmount)} staked
+                  </span>
+                )}
+              </div>
+            )}
           </button>
         ) : (
           <button onClick={() => open()} className="btn-primary w-full">
@@ -243,7 +291,7 @@ export default function Sidebar() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
           <input
             type="text"
-            placeholder="Search token or paste address..."
+            placeholder="Search token or paste add"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input pl-10 pr-10 text-sm"
@@ -283,16 +331,25 @@ export default function Sidebar() {
           </button>
         </div>
 
-        {/* Add Custom Token */}
-        {!showAddToken && (
-          <button
-            onClick={() => setShowAddToken(true)}
-            className="mt-3 text-xs text-afrodex-orange hover:text-afrodex-orange-light flex items-center gap-1 transition-colors"
+        {/* Add Custom Token & List Your Token */}
+        <div className="mt-3 flex items-center gap-3">
+          {!showAddToken && (
+            <button
+              onClick={() => setShowAddToken(true)}
+              className="text-xs text-afrodex-orange hover:text-afrodex-orange-light flex items-center gap-1 transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+              Add custom token
+            </button>
+          )}
+          <a
+            href="mailto:support@afrox.one?subject=I%20want%20to%20List%20a%20token%20on%20AfroDex%20Exchange"
+            className="text-xs text-gray-400 hover:text-afrodex-orange flex items-center gap-1 transition-colors"
           >
-            <Plus className="w-3 h-3" />
-            Add custom token
-          </button>
-        )}
+            <Mail className="w-3 h-3" />
+            List your token
+          </a>
+        </div>
 
         {/* Custom Token Form */}
         {showAddToken && (
@@ -438,13 +495,21 @@ export default function Sidebar() {
             <span>📖</span>
             User Guide
           </a>
-          <span className="text-gray-500">|</span>
+          <span className="text-gray-600">|</span>
           <a 
             href="/api"
             className="flex items-center gap-1 hover:text-afrodex-orange transition-colors"
           >
             <span>📊</span>
             Rest API
+          </a>
+          <span className="text-gray-600">|</span>
+          <a 
+            href="/leaderboard"
+            className="flex items-center gap-1 hover:text-afrodex-orange transition-colors"
+          >
+            <span>🏆</span>
+            Leaderboard
           </a>
         </div>
         <div className="flex items-center justify-between text-xs text-gray-500">
