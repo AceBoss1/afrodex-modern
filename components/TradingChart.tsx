@@ -137,7 +137,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
   }
 
   return (
-    <div className="card h-full flex flex-col" style={{ minHeight: '375px' }}>
+    <div className="card h-full flex flex-col" style={{ minHeight: '425px' }}>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
         <div>
