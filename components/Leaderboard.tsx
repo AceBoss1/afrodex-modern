@@ -175,7 +175,9 @@ export default function Leaderboard() {
   };
 
   const formatEth = (value: number) => {
-    if (value < 0.0001) return '< 0.0001';
+    if (value === 0) return '0';
+    if (value < 0.00000001) return value.toExponential(2);
+    if (value < 0.0001) return value.toFixed(8);
     return value.toFixed(4);
   };
 
