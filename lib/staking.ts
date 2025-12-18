@@ -49,16 +49,12 @@ export const BADGE_TIERS = [
   { name: 'Starter', emoji: '🔘', minStake: 0, multiplier: 0.0, order: 0 },
 ];
 
-// Emission schedule (1T AfroX over 156 weeks / 3 years)
+// Emission schedule (1T AfroX over 52 weeks / 1 year)
 export const EMISSION_SCHEDULE = [
-  { weekStart: 1, weekEnd: 13, weeklyReward: 15_000_000_000, period: 'Year 1 Q1' },
-  { weekStart: 14, weekEnd: 26, weeklyReward: 12_000_000_000, period: 'Year 1 Q2' },
-  { weekStart: 27, weekEnd: 39, weeklyReward: 10_000_000_000, period: 'Year 1 Q3' },
-  { weekStart: 40, weekEnd: 52, weeklyReward: 8_000_000_000, period: 'Year 1 Q4' },
-  { weekStart: 53, weekEnd: 78, weeklyReward: 6_000_000_000, period: 'Year 2 H1' },
-  { weekStart: 79, weekEnd: 104, weeklyReward: 4_000_000_000, period: 'Year 2 H2' },
-  { weekStart: 105, weekEnd: 130, weeklyReward: 3_000_000_000, period: 'Year 3 H1' },
-  { weekStart: 131, weekEnd: 156, weeklyReward: 3_000_000_000, period: 'Year 3 H2' },
+  { weekStart: 1, weekEnd: 13, weeklyReward: 25_000_000_000, period: 'Q1' },
+  { weekStart: 14, weekEnd: 26, weeklyReward: 22_000_000_000, period: 'Q2' },
+  { weekStart: 27, weekEnd: 39, weeklyReward: 18_000_000_000, period: 'Q3' },
+  { weekStart: 40, weekEnd: 52, weeklyReward: 15_000_000_000, period: 'Q4' },
 ];
 
 // Platform fee percentage
