@@ -450,7 +450,7 @@ export default function GuidePage() {
             <div className="space-y-4 text-gray-300">
               <p>
                 The reward pool starts high and decreases over time to incentivize early adoption. 
-                Total distribution: <strong className="text-afrodex-orange">~1 Trillion AfroX</strong> over 3 years.
+                Total distribution: <strong className="text-afrodex-orange">~1 Trillion AfroX</strong> over 1 year (52 weeks).
               </p>
               
               <div className="overflow-x-auto">
@@ -465,58 +465,34 @@ export default function GuidePage() {
                   </thead>
                   <tbody className="text-gray-400">
                     <tr className="border-b border-white/5 bg-green-500/10">
-                      <td className="py-2 px-2 text-green-400">Year 1 Q1</td>
+                      <td className="py-2 px-2 text-green-400">Q1</td>
                       <td className="py-2 px-2">1-13</td>
-                      <td className="py-2 px-2 text-right font-mono text-green-400">15B</td>
-                      <td className="py-2 px-2 text-right font-mono">195B</td>
+                      <td className="py-2 px-2 text-right font-mono text-green-400">25B</td>
+                      <td className="py-2 px-2 text-right font-mono">325B</td>
                     </tr>
                     <tr className="border-b border-white/5">
-                      <td className="py-2 px-2">Year 1 Q2</td>
+                      <td className="py-2 px-2">Q2</td>
                       <td className="py-2 px-2">14-26</td>
-                      <td className="py-2 px-2 text-right font-mono">12B</td>
-                      <td className="py-2 px-2 text-right font-mono">156B</td>
+                      <td className="py-2 px-2 text-right font-mono">22B</td>
+                      <td className="py-2 px-2 text-right font-mono">286B</td>
                     </tr>
                     <tr className="border-b border-white/5">
-                      <td className="py-2 px-2">Year 1 Q3</td>
+                      <td className="py-2 px-2">Q3</td>
                       <td className="py-2 px-2">27-39</td>
-                      <td className="py-2 px-2 text-right font-mono">10B</td>
-                      <td className="py-2 px-2 text-right font-mono">130B</td>
-                    </tr>
-                    <tr className="border-b border-white/5">
-                      <td className="py-2 px-2">Year 1 Q4</td>
-                      <td className="py-2 px-2">40-52</td>
-                      <td className="py-2 px-2 text-right font-mono">8B</td>
-                      <td className="py-2 px-2 text-right font-mono">104B</td>
-                    </tr>
-                    <tr className="border-b border-white/5">
-                      <td className="py-2 px-2">Year 2 H1</td>
-                      <td className="py-2 px-2">53-78</td>
-                      <td className="py-2 px-2 text-right font-mono">6B</td>
-                      <td className="py-2 px-2 text-right font-mono">156B</td>
-                    </tr>
-                    <tr className="border-b border-white/5">
-                      <td className="py-2 px-2">Year 2 H2</td>
-                      <td className="py-2 px-2">79-104</td>
-                      <td className="py-2 px-2 text-right font-mono">4B</td>
-                      <td className="py-2 px-2 text-right font-mono">104B</td>
-                    </tr>
-                    <tr className="border-b border-white/5">
-                      <td className="py-2 px-2">Year 3 H1</td>
-                      <td className="py-2 px-2">105-130</td>
-                      <td className="py-2 px-2 text-right font-mono">3B</td>
-                      <td className="py-2 px-2 text-right font-mono">78B</td>
+                      <td className="py-2 px-2 text-right font-mono">18B</td>
+                      <td className="py-2 px-2 text-right font-mono">234B</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-2">Year 3 H2</td>
-                      <td className="py-2 px-2">131-156</td>
-                      <td className="py-2 px-2 text-right font-mono">3B</td>
-                      <td className="py-2 px-2 text-right font-mono">78B</td>
+                      <td className="py-2 px-2">Q4</td>
+                      <td className="py-2 px-2">40-52</td>
+                      <td className="py-2 px-2 text-right font-mono">15B</td>
+                      <td className="py-2 px-2 text-right font-mono">195B</td>
                     </tr>
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-white/10 font-semibold">
-                      <td className="py-2 px-2" colSpan={3}>Total (156 weeks)</td>
-                      <td className="py-2 px-2 text-right font-mono text-afrodex-orange">~1,001B</td>
+                      <td className="py-2 px-2" colSpan={3}>Total (52 weeks)</td>
+                      <td className="py-2 px-2 text-right font-mono text-afrodex-orange">~1,040B</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -524,7 +500,7 @@ export default function GuidePage() {
 
               <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-sm">
                 <strong className="text-green-400">🚀 Early Bird Advantage:</strong> The first 13 weeks offer 
-                <strong> 15B AfroX per week</strong> — the highest reward rate! Start trading and staking early to maximize your rewards.
+                <strong> 25B AfroX per week</strong> — the highest reward rate! Start trading and staking early to maximize your rewards.
               </div>
             </div>
           </section>
@@ -608,12 +584,29 @@ export default function GuidePage() {
             <div className="space-y-4 text-gray-300">
               <p>
                 Stake AfroX tokens to unlock badge tiers and earn TGIF reward multipliers. 
-                Staking is built into the AfroX token contract.
+                Staking is done through the AfroX DeFi-Hub.
               </p>
               
+              <div className="bg-gradient-to-r from-afrodex-orange/20 to-yellow-600/20 rounded-lg p-4 border border-afrodex-orange/30">
+                <h4 className="font-semibold text-white mb-2 flex items-center gap-2">
+                  <Star className="w-5 h-5 text-yellow-500" />
+                  Stake Your AfroX
+                </h4>
+                <p className="text-sm mb-3">Visit the AfroX DeFi-Hub to stake your tokens and unlock badge multipliers:</p>
+                <a 
+                  href="https://defi.afrox.one/?ref=CFBD73A1" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="btn-primary inline-flex items-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open AfroX DeFi-Hub
+                </a>
+              </div>
+
               <div className="bg-afrodex-black-lighter rounded-lg p-4">
                 <h4 className="font-semibold text-white mb-2">AfroX Token Contract</h4>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <code className="bg-black/30 px-2 py-1 rounded text-xs font-mono text-afrodex-orange">
                     0x08130635368AA28b217a4dfb68E1bF8dC525621C
                   </code>
@@ -632,10 +625,10 @@ export default function GuidePage() {
                 <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
                   <h4 className="font-semibold text-green-400 mb-2">✓ How Staking Works</h4>
                   <ul className="text-sm space-y-1">
-                    <li>• Stake directly via AfroX contract</li>
+                    <li>• Visit <a href="https://defi.afrox.one/?ref=CFBD73A1" target="_blank" rel="noopener noreferrer" className="text-afrodex-orange hover:underline">defi.afrox.one</a></li>
+                    <li>• Connect your wallet and stake AfroX</li>
                     <li>• Your stake is read at weekly snapshot</li>
                     <li>• Higher stake = higher badge tier</li>
-                    <li>• Unstake anytime (no lock period)</li>
                   </ul>
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
