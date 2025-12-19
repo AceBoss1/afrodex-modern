@@ -1,264 +1,487 @@
-// components/TradingChart.tsx
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useTradingStore } from '@/lib/store';
-import { Token } from '@/lib/tokens';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   AreaChart,
   Area,
   XAxis,
   YAxis,
-  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { format } from 'date-fns';
-import { TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, Time } from 'lightweight-charts';
+import { BarChart3, TrendingUp } from 'lucide-react';
+
+interface Trade {
+  id?: string;
+  price: number;
+  amount: number;
+  total: number;
+  timestamp: number;
+  type: 'buy' | 'sell';
+  txHash?: string;
+}
 
 interface TradingChartProps {
-  baseToken: Token;
-  quoteToken: Token;
+  trades: Trade[];
+  tokenSymbol: string;
+  baseSymbol?: string;
 }
 
-type Timeframe = '1H' | '24H' | '7D' | 'ALL';
+type TimeRange = '1M' | '15M' | '1H' | '24H' | '7D' | 'ALL';
+type ChartType = 'area' | 'candle';
 
-// Format price with up to 15 decimals for very small prices
-function formatChartPrice(price: number): string {
-  if (price === 0) return '0';
-  
-  const absPrice = Math.abs(price);
-  
-  if (absPrice >= 1) return price.toFixed(6);
-  if (absPrice >= 0.0001) return price.toFixed(8);
-  if (absPrice >= 0.000001) return price.toFixed(10);
-  if (absPrice >= 0.000000001) return price.toFixed(12);
-  return price.toFixed(15);
+interface OHLCData {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
-function formatVolume(volume: number): string {
-  if (volume === 0) return '0';
-  if (volume < 0.000001) return volume.toFixed(12);
-  if (volume < 0.001) return volume.toFixed(9);
-  if (volume < 1) return volume.toFixed(6);
-  return volume.toFixed(4);
-}
+// Time range configurations in milliseconds
+const TIME_RANGES: Record<TimeRange, { ms: number; bucketMs: number; label: string }> = {
+  '1M': { ms: 60 * 1000, bucketMs: 5 * 1000, label: '1 Min' },           // 5 second candles
+  '15M': { ms: 15 * 60 * 1000, bucketMs: 30 * 1000, label: '15 Min' },   // 30 second candles
+  '1H': { ms: 60 * 60 * 1000, bucketMs: 2 * 60 * 1000, label: '1 Hour' }, // 2 minute candles
+  '24H': { ms: 24 * 60 * 60 * 1000, bucketMs: 30 * 60 * 1000, label: '24 Hours' }, // 30 minute candles
+  '7D': { ms: 7 * 24 * 60 * 60 * 1000, bucketMs: 4 * 60 * 60 * 1000, label: '7 Days' }, // 4 hour candles
+  'ALL': { ms: Infinity, bucketMs: 24 * 60 * 60 * 1000, label: 'All Time' }, // Daily candles
+};
 
-export default function TradingChart({ baseToken, quoteToken }: TradingChartProps) {
-  const { trades, isLoadingTrades } = useTradingStore();
-  const [timeframe, setTimeframe] = useState<Timeframe>('24H');
+export default function TradingChart({ trades, tokenSymbol, baseSymbol = 'ETH' }: TradingChartProps) {
+  const [timeRange, setTimeRange] = useState<TimeRange>('24H');
+  const [chartType, setChartType] = useState<ChartType>('area');
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
-  const chartData = useMemo(() => {
-    if (trades.length === 0) return [];
-
-    const now = Date.now() / 1000;
-    const intervals: Record<Timeframe, number> = {
-      '1H': 60 * 60,
-      '24H': 24 * 60 * 60,
-      '7D': 7 * 24 * 60 * 60,
-      'ALL': Infinity,
-    };
-
-    const timeLimit = now - intervals[timeframe];
-    const filteredTrades = trades.filter(t => 
-      timeframe === 'ALL' || t.timestamp >= timeLimit
-    );
-
-    if (filteredTrades.length === 0) return [];
-
-    const bucketCount = Math.min(filteredTrades.length, 100);
-    const bucketSize = Math.max(1, Math.ceil(filteredTrades.length / bucketCount));
+  // Filter trades by time range
+  const filteredTrades = useMemo(() => {
+    if (!trades.length) return [];
     
-    const data: { time: string; price: number; timestamp: number }[] = [];
+    const now = Date.now();
+    const range = TIME_RANGES[timeRange];
+    
+    if (range.ms === Infinity) {
+      return [...trades].sort((a, b) => a.timestamp - b.timestamp);
+    }
+    
+    const cutoff = now - range.ms;
+    return trades
+      .filter(t => t.timestamp >= cutoff)
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }, [trades, timeRange]);
 
-    for (let i = filteredTrades.length - 1; i >= 0; i -= bucketSize) {
-      const endIdx = Math.max(0, i - bucketSize + 1);
-      const bucket = filteredTrades.slice(endIdx, i + 1);
-      
-      if (bucket.length > 0) {
-        const avgPrice = bucket.reduce((sum, t) => sum + t.price, 0) / bucket.length;
-        const timestamp = bucket[0].timestamp;
-        
-        data.push({
-          time: format(new Date(timestamp * 1000), timeframe === '1H' ? 'HH:mm' : 'MMM dd HH:mm'),
-          price: avgPrice,
-          timestamp,
+  // Generate OHLC data from trades
+  const ohlcData = useMemo((): OHLCData[] => {
+    if (!filteredTrades.length) return [];
+
+    const range = TIME_RANGES[timeRange];
+    const bucketMs = range.bucketMs;
+    const buckets: Map<number, Trade[]> = new Map();
+
+    // Group trades into time buckets
+    filteredTrades.forEach(trade => {
+      const bucketTime = Math.floor(trade.timestamp / bucketMs) * bucketMs;
+      if (!buckets.has(bucketTime)) {
+        buckets.set(bucketTime, []);
+      }
+      buckets.get(bucketTime)!.push(trade);
+    });
+
+    // Convert buckets to OHLC
+    const ohlc: OHLCData[] = [];
+    const sortedTimes = Array.from(buckets.keys()).sort((a, b) => a - b);
+
+    sortedTimes.forEach(time => {
+      const bucketTrades = buckets.get(time)!;
+      const prices = bucketTrades.map(t => t.price);
+      const volumes = bucketTrades.reduce((sum, t) => sum + t.amount, 0);
+
+      ohlc.push({
+        time: Math.floor(time / 1000), // Convert to seconds for lightweight-charts
+        open: prices[0],
+        high: Math.max(...prices),
+        low: Math.min(...prices),
+        close: prices[prices.length - 1],
+        volume: volumes,
+      });
+    });
+
+    return ohlc;
+  }, [filteredTrades, timeRange]);
+
+  // Generate area chart data (simple price over time)
+  const areaChartData = useMemo(() => {
+    if (!filteredTrades.length) return [];
+
+    const range = TIME_RANGES[timeRange];
+    const bucketMs = range.bucketMs;
+    const buckets: Map<number, number[]> = new Map();
+
+    filteredTrades.forEach(trade => {
+      const bucketTime = Math.floor(trade.timestamp / bucketMs) * bucketMs;
+      if (!buckets.has(bucketTime)) {
+        buckets.set(bucketTime, []);
+      }
+      buckets.get(bucketTime)!.push(trade.price);
+    });
+
+    return Array.from(buckets.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([time, prices]) => ({
+        time,
+        price: prices.reduce((a, b) => a + b, 0) / prices.length,
+        displayTime: formatTime(time, timeRange),
+      }));
+  }, [filteredTrades, timeRange]);
+
+  // Initialize and update Lightweight Charts
+  useEffect(() => {
+    if (chartType !== 'candle' || !chartContainerRef.current) return;
+
+    // Clean up existing chart
+    if (chartRef.current) {
+      chartRef.current.remove();
+      chartRef.current = null;
+    }
+
+    // Create new chart
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { color: 'transparent' },
+        textColor: '#9ca3af',
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: {
+          color: '#f97316',
+          width: 1,
+          style: 2,
+          labelBackgroundColor: '#f97316',
+        },
+        horzLine: {
+          color: '#f97316',
+          width: 1,
+          style: 2,
+          labelBackgroundColor: '#f97316',
+        },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.25, // Leave room for volume
+        },
+      },
+      timeScale: {
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        timeVisible: true,
+        secondsVisible: timeRange === '1M' || timeRange === '15M',
+      },
+      handleScroll: {
+        vertTouchDrag: false,
+      },
+    });
+
+    // Add candlestick series
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+    });
+
+    // Add volume series
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#f97316',
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '',
+    });
+
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.85,
+        bottom: 0,
+      },
+    });
+
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+
+    // Handle resize
+    const handleResize = () => {
+      if (chartContainerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
         });
       }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, [chartType, timeRange]);
+
+  // Update chart data
+  useEffect(() => {
+    if (chartType !== 'candle' || !candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+    if (ohlcData.length === 0) {
+      candleSeriesRef.current.setData([]);
+      volumeSeriesRef.current.setData([]);
+      return;
     }
 
-    return data;
-  }, [trades, timeframe]);
+    // Format data for lightweight-charts
+    const candleData: CandlestickData[] = ohlcData.map(d => ({
+      time: d.time as Time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
 
-  const stats = useMemo(() => {
-    const now = Date.now() / 1000;
-    const oneDayAgo = now - 24 * 60 * 60;
-    const trades24h = trades.filter(t => t.timestamp >= oneDayAgo);
-    
-    const volume24h = trades24h.reduce((sum, t) => sum + t.quoteAmount, 0);
-    
-    if (chartData.length < 2) {
-      return { priceChange: { value: 0, percent: 0 }, volume24h };
+    const volumeData: HistogramData[] = ohlcData.map(d => ({
+      time: d.time as Time,
+      value: d.volume,
+      color: d.close >= d.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+    }));
+
+    candleSeriesRef.current.setData(candleData);
+    volumeSeriesRef.current.setData(volumeData);
+
+    // Fit content
+    if (chartRef.current) {
+      chartRef.current.timeScale().fitContent();
     }
-    
-    const first = chartData[0].price;
-    const last = chartData[chartData.length - 1].price;
-    const change = last - first;
-    const percent = first > 0 ? (change / first) * 100 : 0;
-    
-    return { priceChange: { value: change, percent }, volume24h };
-  }, [chartData, trades]);
+  }, [ohlcData, chartType]);
 
-  const currentPrice = trades.length > 0 ? trades[0].price : 0;
-  const isPositive = stats.priceChange.percent >= 0;
+  // Calculate price statistics
+  const priceStats = useMemo(() => {
+    if (!filteredTrades.length) {
+      return { current: 0, change: 0, changePercent: 0, high: 0, low: 0 };
+    }
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload || !payload.length) return null;
+    const prices = filteredTrades.map(t => t.price);
+    const current = prices[prices.length - 1];
+    const first = prices[0];
+    const change = current - first;
+    const changePercent = first > 0 ? (change / first) * 100 : 0;
 
-    return (
-      <div className="bg-afrodex-black-card border border-white/10 rounded-lg p-3 shadow-xl">
-        <p className="text-xs text-gray-400 mb-1">{label}</p>
-        <p className="text-sm font-mono font-semibold">
-          {formatChartPrice(payload[0].value)} {quoteToken.symbol}
-        </p>
-      </div>
-    );
+    return {
+      current,
+      change,
+      changePercent,
+      high: Math.max(...prices),
+      low: Math.min(...prices),
+    };
+  }, [filteredTrades]);
+
+  // Format price with appropriate precision
+  const formatPrice = (price: number): string => {
+    if (price === 0) return '0';
+    if (price < 0.000000001) return price.toExponential(4);
+    if (price < 0.00000001) return price.toFixed(15);
+    if (price < 0.0000001) return price.toFixed(14);
+    if (price < 0.000001) return price.toFixed(12);
+    if (price < 0.00001) return price.toFixed(10);
+    if (price < 0.0001) return price.toFixed(8);
+    if (price < 0.01) return price.toFixed(6);
+    if (price < 1) return price.toFixed(4);
+    return price.toFixed(2);
   };
 
-  if (isLoadingTrades) {
-    return (
-      <div className="card h-full flex items-center justify-center" style={{ minHeight: '220px' }}>
-        <div className="text-center">
-          <div className="spinner spinner-lg mb-3" />
-          <p className="text-sm text-gray-500">Loading chart data...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="card h-full flex flex-col" style={{ minHeight: '400px' }}>
+    <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-xl font-display font-bold">
-              {baseToken.symbol}/{quoteToken.symbol}
-            </h3>
-            <span className={`flex items-center gap-1 text-sm font-medium ${
-              isPositive ? 'text-trade-buy' : 'text-trade-sell'
+          <h3 className="text-lg font-semibold text-white">
+            {tokenSymbol}/{baseSymbol}
+          </h3>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xl font-bold text-white">
+              {formatPrice(priceStats.current)}
+            </span>
+            <span className={`text-sm font-medium ${
+              priceStats.change >= 0 ? 'text-green-500' : 'text-red-500'
             }`}>
-              {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              {isPositive ? '+' : ''}{stats.priceChange.percent.toFixed(2)}%
+              {priceStats.change >= 0 ? '+' : ''}{formatPrice(priceStats.change)} ({priceStats.changePercent.toFixed(2)}%)
             </span>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono">
-              {currentPrice > 0 ? formatChartPrice(currentPrice) : '0.000000000000000'}
-            </span>
-            <span className="text-sm text-gray-500">{quoteToken.symbol}</span>
           </div>
         </div>
 
-        {/* 24H Volume + Timeframe Selector */}
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <span className="text-[10px] text-gray-500 uppercase block">24H Vol</span>
-            <span className="text-sm font-mono font-semibold">
-              {formatVolume(stats.volume24h)} {quoteToken.symbol}
-            </span>
+        {/* Controls */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Chart Type Toggle */}
+          <div className="flex bg-gray-800 rounded-lg p-1">
+            <button
+              onClick={() => setChartType('area')}
+              className={`p-2 rounded transition-colors ${
+                chartType === 'area'
+                  ? 'bg-orange-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+              title="Area Chart"
+            >
+              <TrendingUp className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setChartType('candle')}
+              className={`p-2 rounded transition-colors ${
+                chartType === 'candle'
+                  ? 'bg-orange-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+              title="Candlestick Chart"
+            >
+              <BarChart3 className="w-4 h-4" />
+            </button>
           </div>
-          
-          <div className="flex gap-1 bg-afrodex-black-lighter rounded-lg p-1">
-            {(['1H', '24H', '7D', 'ALL'] as Timeframe[]).map((tf) => (
+
+          {/* Time Range Selector */}
+          <div className="flex bg-gray-800 rounded-lg p-1">
+            {(['1M', '15M', '1H', '24H', '7D', 'ALL'] as TimeRange[]).map((range) => (
               <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-                  timeframe === tf
-                    ? 'bg-afrodex-orange text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                key={range}
+                onClick={() => setTimeRange(range)}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  timeRange === range
+                    ? 'bg-orange-500 text-white'
+                    : 'text-gray-400 hover:text-white'
                 }`}
               >
-                {tf}
+                {range}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Chart - Fixed height of 220px */}
-      <div className="flex-1 min-h-0" style={{ height: '220px' }}>
-        {chartData.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-gray-500">
-            <BarChart2 className="w-12 h-12 mb-3 opacity-30" />
-            <p className="text-sm">No trade data available for this timeframe</p>
-            <p className="text-xs text-gray-600 mt-1">Trades will appear here once activity begins</p>
+      {/* Price Stats Bar */}
+      <div className="flex gap-4 text-xs text-gray-400 mb-4">
+        <span>H: <span className="text-green-500">{formatPrice(priceStats.high)}</span></span>
+        <span>L: <span className="text-red-500">{formatPrice(priceStats.low)}</span></span>
+        <span>Trades: <span className="text-white">{filteredTrades.length}</span></span>
+      </div>
+
+      {/* Chart Container */}
+      <div className="h-[400px] relative">
+        {filteredTrades.length === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+            No trades in selected time range
           </div>
-        ) : (
+        ) : chartType === 'area' ? (
+          /* Area Chart (Recharts) */
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <AreaChart data={areaChartData}>
               <defs>
                 <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={isPositive ? '#00D26A' : '#FF4757'} stopOpacity={0.3} />
-                  <stop offset="100%" stopColor={isPositive ? '#00D26A' : '#FF4757'} stopOpacity={0} />
+                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
               <XAxis
-                dataKey="time"
-                stroke="#666"
-                tick={{ fill: '#666', fontSize: 10 }}
-                tickLine={false}
-                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                dataKey="displayTime"
+                stroke="#6b7280"
+                tick={{ fill: '#9ca3af', fontSize: 10 }}
+                tickLine={{ stroke: '#374151' }}
+                axisLine={{ stroke: '#374151' }}
               />
               <YAxis
-                stroke="#666"
-                tick={{ fill: '#666', fontSize: 10 }}
-                tickLine={false}
-                axisLine={false}
-                domain={['dataMin', 'dataMax']}
-                tickFormatter={(value) => formatChartPrice(value)}
-                width={100}
+                stroke="#6b7280"
+                tick={{ fill: '#9ca3af', fontSize: 10 }}
+                tickLine={{ stroke: '#374151' }}
+                axisLine={{ stroke: '#374151' }}
+                tickFormatter={(value) => formatPrice(value)}
+                domain={['auto', 'auto']}
+                width={80}
               />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#1f2937',
+                  border: '1px solid #374151',
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                }}
+                labelStyle={{ color: '#9ca3af', marginBottom: '4px' }}
+                formatter={(value: number) => [formatPrice(value), 'Price']}
+              />
               <Area
                 type="monotone"
                 dataKey="price"
-                stroke={isPositive ? '#00D26A' : '#FF4757'}
+                stroke="#f97316"
                 strokeWidth={2}
                 fill="url(#priceGradient)"
                 dot={false}
-                activeDot={{ r: 4, fill: isPositive ? '#00D26A' : '#FF4757', stroke: '#fff', strokeWidth: 2 }}
+                activeDot={{ r: 4, fill: '#f97316' }}
               />
             </AreaChart>
           </ResponsiveContainer>
+        ) : (
+          /* Candlestick Chart (Lightweight Charts) */
+          <div ref={chartContainerRef} className="w-full h-full" />
         )}
       </div>
 
-      {/* Stats Footer */}
-      {chartData.length > 0 && (
-        <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-white/5">
-          <div>
-            <p className="text-xs text-gray-500 mb-1">24h Trades</p>
-            <p className="text-sm font-semibold">
-              {trades.filter(t => t.timestamp >= Date.now() / 1000 - 24 * 60 * 60).length}
-            </p>
+      {/* Legend */}
+      {chartType === 'candle' && filteredTrades.length > 0 && (
+        <div className="flex items-center justify-center gap-6 mt-4 text-xs text-gray-400">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-green-500 rounded-sm"></div>
+            <span>Bullish</span>
           </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-1">24h High</p>
-            <p className="text-sm font-mono">
-              {chartData.length > 0 ? formatChartPrice(Math.max(...chartData.map(d => d.price))) : '—'}
-            </p>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-red-500 rounded-sm"></div>
+            <span>Bearish</span>
           </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-1">24h Low</p>
-            <p className="text-sm font-mono">
-              {chartData.length > 0 ? formatChartPrice(Math.min(...chartData.map(d => d.price))) : '—'}
-            </p>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-orange-500/50 rounded-sm"></div>
+            <span>Volume</span>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+// Helper function to format time for area chart display
+function formatTime(timestamp: number, range: TimeRange): string {
+  const date = new Date(timestamp);
+  
+  switch (range) {
+    case '1M':
+    case '15M':
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    case '1H':
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    case '24H':
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    case '7D':
+      return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit' });
+    case 'ALL':
+    default:
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
 }
