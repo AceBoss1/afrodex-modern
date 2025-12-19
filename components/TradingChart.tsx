@@ -11,7 +11,15 @@ import {
 } from 'recharts';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { BarChart3, TrendingUp } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+// Create Supabase client
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
 
 // Token interface (matching your existing Token type)
 interface Token {
@@ -76,9 +84,16 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
 
   // Fetch trades from Supabase
   useEffect(() => {
+    const supabase = getSupabase();
+    
     const fetchTrades = async () => {
       setIsLoading(true);
       try {
+        if (!supabase) {
+          console.warn('Supabase not configured');
+          return;
+        }
+        
         const { data, error } = await supabase
           .from('trades')
           .select('*')
@@ -112,6 +127,8 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
     fetchTrades();
 
     // Subscribe to real-time updates
+    if (!supabase) return;
+    
     const channel = supabase
       .channel(`trades-${baseToken.address}`)
       .on(
@@ -138,7 +155,9 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [baseToken.address]);
 
