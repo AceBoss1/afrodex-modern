@@ -499,7 +499,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
       </div>
 
       {/* Chart Container */}
-      <div className="flex-1 min-h-[300px] relative">
+      <div className="flex-1 min-h-[250px] relative">
         {isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center text-gray-500">
             <div className="animate-pulse">Loading chart data...</div>
