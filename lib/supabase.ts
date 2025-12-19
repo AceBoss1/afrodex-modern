@@ -1,5 +1,6 @@
 // lib/supabase.ts
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getBadgeTier } from './staking';
 
 export interface DbOrder {
   id?: number;
@@ -371,11 +372,12 @@ export async function saveTrades(trades: DbTrade[]): Promise<boolean> {
 /**
  * Save a trade after execution - CRITICAL FUNCTION
  * This is called after a trade is successfully executed on-chain
- * Also records stats for TGIF rewards
+ * Also records stats for TGIF rewards with real-time weighted_fees calculation
  */
 export async function saveTradeAfterExecution(
   trade: TradeExecutionInput,
-  gasFeeEth?: number
+  gasFeeEth?: number,
+  takerStakedAmount?: number
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabaseClient();
   if (!supabase) {
@@ -391,6 +393,8 @@ export async function saveTradeAfterExecution(
   console.log('baseAmount:', trade.baseAmount);
   console.log('quoteAmount:', trade.quoteAmount);
   console.log('side:', trade.side);
+  console.log('gasFeeEth:', gasFeeEth);
+  console.log('takerStakedAmount:', takerStakedAmount);
   console.log('================================');
 
   const dbTrade: DbTrade = {
@@ -432,7 +436,8 @@ export async function saveTradeAfterExecution(
     trade.taker,
     gasFeeEth || 0,
     platformFeeEth,
-    volumeEth
+    volumeEth,
+    takerStakedAmount
   );
   
   return { success: true };
@@ -498,32 +503,131 @@ export async function clearAllOrders(): Promise<boolean> {
 // ============================================
 
 /**
+ * Get current TGIF week range (Friday to Thursday)
+ */
+function getCurrentWeekRange(): { start: Date; end: Date; weekStartStr: string } {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  // Friday = 5, so we calculate days since last Friday
+  const daysSinceFriday = (dayOfWeek + 2) % 7;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - daysSinceFriday);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  weekEnd.setHours(23, 59, 59, 999);
+  
+  return { 
+    start: weekStart, 
+    end: weekEnd,
+    weekStartStr: weekStart.toISOString().split('T')[0]
+  };
+}
+
+/**
  * Record trading stats for TGIF rewards
  * Called after every trade execution for the TAKER only
+ * Now includes real-time weighted_fees calculation!
  */
 export async function recordTradeStats(
   takerAddress: string,
   gasFeeEth: number,
   platformFeeEth: number,
-  volumeEth: number
+  volumeEth: number,
+  stakedAmount?: number
 ): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
   try {
-    // Call the database function to update stats
-    const { error } = await supabase.rpc('update_trade_stats', {
-      p_wallet: takerAddress.toLowerCase(),
+    const wallet = takerAddress.toLowerCase();
+    const { weekStartStr } = getCurrentWeekRange();
+    
+    // Get the taker's badge for multiplier
+    // If stakedAmount is provided, use it; otherwise try to fetch from profile
+    let multiplier = 1;
+    let badgeTier = 'Starter';
+    let badgeEmoji = '🌱';
+    
+    if (stakedAmount !== undefined) {
+      const badge = getBadgeTier(stakedAmount);
+      multiplier = badge.multiplier;
+      badgeTier = badge.name;
+      badgeEmoji = badge.emoji;
+    } else {
+      // Try to get from user profile
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('staked_amount, badge_tier, badge_emoji')
+        .eq('wallet_address', wallet)
+        .single();
+      
+      if (profile && profile.staked_amount) {
+        const badge = getBadgeTier(profile.staked_amount);
+        multiplier = badge.multiplier;
+        badgeTier = badge.name;
+        badgeEmoji = badge.emoji;
+      }
+    }
+    
+    const totalFees = gasFeeEth + platformFeeEth;
+    const weightedFees = totalFees * multiplier;
+    
+    console.log('Recording trade stats:', {
+      wallet,
+      gasFeeEth,
+      platformFeeEth,
+      totalFees,
+      multiplier,
+      weightedFees,
+      volumeEth
+    });
+
+    // Try RPC first
+    const { error: rpcError } = await supabase.rpc('update_trade_stats', {
+      p_wallet: wallet,
       p_gas_fee_eth: gasFeeEth,
       p_platform_fee_eth: platformFeeEth,
       p_volume_eth: volumeEth,
     });
 
-    if (error) {
-      console.error('Error recording trade stats:', error);
+    if (rpcError) {
+      console.log('RPC failed, using direct update:', rpcError.message);
+      // Fallback: Direct insert/update
+      await recordTradeStatsDirect(
+        wallet, 
+        gasFeeEth, 
+        platformFeeEth, 
+        volumeEth,
+        multiplier,
+        badgeTier,
+        badgeEmoji
+      );
+    } else {
+      // RPC succeeded but we still need to update weighted_fees
+      // Update the weekly stats with badge info and weighted_fees
+      const { data: existing } = await supabase
+        .from('weekly_trading_stats')
+        .select('gas_fees_eth, platform_fees_eth')
+        .eq('wallet_address', wallet)
+        .eq('week_start', weekStartStr)
+        .single();
       
-      // Fallback: Direct insert/update if RPC fails
-      await recordTradeStatsDirect(takerAddress, gasFeeEth, platformFeeEth, volumeEth);
+      if (existing) {
+        const newTotalFees = (existing.gas_fees_eth || 0) + (existing.platform_fees_eth || 0);
+        const newWeightedFees = newTotalFees * multiplier;
+        
+        await supabase
+          .from('weekly_trading_stats')
+          .update({
+            multiplier,
+            badge_tier: badgeTier,
+            badge_emoji: badgeEmoji,
+            weighted_fees: newWeightedFees,
+          })
+          .eq('wallet_address', wallet)
+          .eq('week_start', weekStartStr);
+      }
     }
 
     return true;
@@ -535,43 +639,39 @@ export async function recordTradeStats(
 
 /**
  * Direct insert/update for trade stats (fallback if RPC fails)
+ * Now includes weighted_fees calculation
  */
 async function recordTradeStatsDirect(
-  takerAddress: string,
+  wallet: string,
   gasFeeEth: number,
   platformFeeEth: number,
-  volumeEth: number
+  volumeEth: number,
+  multiplier: number,
+  badgeTier: string,
+  badgeEmoji: string
 ): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  const wallet = takerAddress.toLowerCase();
-  
-  // Calculate current week (Friday to Thursday)
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const daysSinceFriday = (dayOfWeek + 2) % 7;
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - daysSinceFriday);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
+  const { start: weekStart, end: weekEnd, weekStartStr } = getCurrentWeekRange();
 
   // Update user profile
-  const { data: existing } = await supabase
+  const { data: existingProfile } = await supabase
     .from('user_profiles')
     .select('*')
     .eq('wallet_address', wallet)
     .single();
 
-  if (existing) {
+  if (existingProfile) {
     await supabase
       .from('user_profiles')
       .update({
-        total_gas_fees_eth: (existing.total_gas_fees_eth || 0) + gasFeeEth,
-        total_platform_fees_eth: (existing.total_platform_fees_eth || 0) + platformFeeEth,
-        total_volume_eth: (existing.total_volume_eth || 0) + volumeEth,
-        trade_count: (existing.trade_count || 0) + 1,
+        total_gas_fees_eth: (existingProfile.total_gas_fees_eth || 0) + gasFeeEth,
+        total_platform_fees_eth: (existingProfile.total_platform_fees_eth || 0) + platformFeeEth,
+        total_volume_eth: (existingProfile.total_volume_eth || 0) + volumeEth,
+        trade_count: (existingProfile.trade_count || 0) + 1,
+        badge_tier: badgeTier,
+        badge_emoji: badgeEmoji,
         updated_at: new Date().toISOString(),
       })
       .eq('wallet_address', wallet);
@@ -584,12 +684,12 @@ async function recordTradeStatsDirect(
         total_platform_fees_eth: platformFeeEth,
         total_volume_eth: volumeEth,
         trade_count: 1,
+        badge_tier: badgeTier,
+        badge_emoji: badgeEmoji,
       });
   }
 
-  // Update weekly stats
-  const weekStartStr = weekStart.toISOString().split('T')[0];
-  
+  // Update weekly stats with weighted_fees
   const { data: weeklyExisting } = await supabase
     .from('weekly_trading_stats')
     .select('*')
@@ -598,17 +698,28 @@ async function recordTradeStatsDirect(
     .single();
 
   if (weeklyExisting) {
+    const newGasFees = (weeklyExisting.gas_fees_eth || 0) + gasFeeEth;
+    const newPlatformFees = (weeklyExisting.platform_fees_eth || 0) + platformFeeEth;
+    const newWeightedFees = (newGasFees + newPlatformFees) * multiplier;
+    
     await supabase
       .from('weekly_trading_stats')
       .update({
-        gas_fees_eth: (weeklyExisting.gas_fees_eth || 0) + gasFeeEth,
-        platform_fees_eth: (weeklyExisting.platform_fees_eth || 0) + platformFeeEth,
+        gas_fees_eth: newGasFees,
+        platform_fees_eth: newPlatformFees,
         volume_eth: (weeklyExisting.volume_eth || 0) + volumeEth,
         trade_count: (weeklyExisting.trade_count || 0) + 1,
+        multiplier,
+        badge_tier: badgeTier,
+        badge_emoji: badgeEmoji,
+        weighted_fees: newWeightedFees,
       })
       .eq('wallet_address', wallet)
       .eq('week_start', weekStartStr);
   } else {
+    const totalFees = gasFeeEth + platformFeeEth;
+    const weightedFees = totalFees * multiplier;
+    
     await supabase
       .from('weekly_trading_stats')
       .insert({
@@ -619,6 +730,10 @@ async function recordTradeStatsDirect(
         platform_fees_eth: platformFeeEth,
         volume_eth: volumeEth,
         trade_count: 1,
+        multiplier,
+        badge_tier: badgeTier,
+        badge_emoji: badgeEmoji,
+        weighted_fees: weightedFees,
       });
   }
 }
@@ -634,21 +749,13 @@ export async function getUserTGIFStats(walletAddress: string): Promise<{
   if (!supabase) return null;
 
   const wallet = walletAddress.toLowerCase();
+  const { weekStartStr } = getCurrentWeekRange();
 
   const { data: profile } = await supabase
     .from('user_profiles')
     .select('*')
     .eq('wallet_address', wallet)
     .single();
-
-  // Get current week start
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const daysSinceFriday = (dayOfWeek + 2) % 7;
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - daysSinceFriday);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekStartStr = weekStart.toISOString().split('T')[0];
 
   const { data: weeklyStats } = await supabase
     .from('weekly_trading_stats')
@@ -668,16 +775,73 @@ export async function getLeaderboard(type: 'weekly' | 'alltime', limit = 50): Pr
   if (!supabase) return [];
 
   if (type === 'weekly') {
+    const { weekStartStr } = getCurrentWeekRange();
+    
     const { data } = await supabase
-      .from('weekly_leaderboard')
+      .from('weekly_trading_stats')
       .select('*')
+      .eq('week_start', weekStartStr)
+      .order('weighted_fees', { ascending: false })
       .limit(limit);
     return data || [];
   } else {
     const { data } = await supabase
-      .from('leaderboard')
+      .from('user_profiles')
       .select('*')
+      .order('total_volume_eth', { ascending: false })
       .limit(limit);
     return data || [];
   }
+}
+
+/**
+ * Update user's badge info based on current staking
+ */
+export async function updateUserBadge(
+  walletAddress: string, 
+  stakedAmount: number
+): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const wallet = walletAddress.toLowerCase();
+  const badge = getBadgeTier(stakedAmount);
+  const { weekStartStr } = getCurrentWeekRange();
+
+  // Update user profile
+  await supabase
+    .from('user_profiles')
+    .upsert({
+      wallet_address: wallet,
+      staked_amount: stakedAmount,
+      badge_tier: badge.name,
+      badge_emoji: badge.emoji,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'wallet_address' });
+
+  // Also update weekly stats if exists
+  const { data: weeklyStats } = await supabase
+    .from('weekly_trading_stats')
+    .select('gas_fees_eth, platform_fees_eth')
+    .eq('wallet_address', wallet)
+    .eq('week_start', weekStartStr)
+    .single();
+
+  if (weeklyStats) {
+    const totalFees = (weeklyStats.gas_fees_eth || 0) + (weeklyStats.platform_fees_eth || 0);
+    const weightedFees = totalFees * badge.multiplier;
+
+    await supabase
+      .from('weekly_trading_stats')
+      .update({
+        multiplier: badge.multiplier,
+        badge_tier: badge.name,
+        badge_emoji: badge.emoji,
+        weighted_fees: weightedFees,
+      })
+      .eq('wallet_address', wallet)
+      .eq('week_start', weekStartStr);
+  }
+
+  return true;
 }
