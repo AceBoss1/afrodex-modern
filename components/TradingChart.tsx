@@ -11,15 +11,7 @@ import {
 } from 'recharts';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { BarChart3, TrendingUp } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-// Create Supabase client
-function getSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key);
-}
+import { getSupabaseClient, DbTrade } from '@/lib/supabase';
 
 // Token interface (matching your existing Token type)
 interface Token {
@@ -36,7 +28,7 @@ interface Token {
 }
 
 interface Trade {
-  id?: string;
+  id?: number;
   price: number;
   amount: number;
   total: number;
@@ -74,7 +66,7 @@ const TIME_RANGES: Record<TimeRange, { ms: number; bucketMs: number; label: stri
 
 export default function TradingChart({ baseToken, quoteToken }: TradingChartProps) {
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [timeRange, setTimeRange] = useState<TimeRange>('24H');
+  const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [chartType, setChartType] = useState<ChartType>('area');
   const [isLoading, setIsLoading] = useState(true);
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -84,38 +76,47 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
 
   // Fetch trades from Supabase
   useEffect(() => {
-    const supabase = getSupabase();
-    
     const fetchTrades = async () => {
       setIsLoading(true);
       try {
+        const supabase = getSupabaseClient();
         if (!supabase) {
           console.warn('Supabase not configured');
+          setIsLoading(false);
           return;
         }
+        
+        console.log('Fetching trades for:', baseToken.address.toLowerCase(), quoteToken.address.toLowerCase());
         
         const { data, error } = await supabase
           .from('trades')
           .select('*')
-          .eq('token_address', baseToken.address.toLowerCase())
-          .order('timestamp', { ascending: true });
+          .eq('base_token', baseToken.address.toLowerCase())
+          .eq('quote_token', quoteToken.address.toLowerCase())
+          .order('block_timestamp', { ascending: true });
 
         if (error) {
           console.error('Error fetching trades:', error);
+          setIsLoading(false);
           return;
         }
 
-        if (data) {
-          const formattedTrades: Trade[] = data.map((t) => ({
+        console.log('Fetched trades:', data?.length || 0);
+
+        if (data && data.length > 0) {
+          const formattedTrades: Trade[] = data.map((t: DbTrade) => ({
             id: t.id,
-            price: parseFloat(t.price),
-            amount: parseFloat(t.amount),
-            total: parseFloat(t.total),
-            timestamp: new Date(t.timestamp).getTime(),
-            type: t.side as 'buy' | 'sell',
+            price: t.price,
+            amount: t.base_amount,
+            total: t.quote_amount,
+            timestamp: t.block_timestamp ? new Date(t.block_timestamp).getTime() : Date.now(),
+            type: t.side,
             txHash: t.tx_hash,
           }));
+          console.log('Formatted trades:', formattedTrades.length);
           setTrades(formattedTrades);
+        } else {
+          setTrades([]);
         }
       } catch (err) {
         console.error('Failed to fetch trades:', err);
@@ -127,29 +128,35 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
     fetchTrades();
 
     // Subscribe to real-time updates
+    const supabase = getSupabaseClient();
     if (!supabase) return;
     
     const channel = supabase
-      .channel(`trades-${baseToken.address}`)
+      .channel(`trades-chart-${baseToken.address}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'trades',
-          filter: `token_address=eq.${baseToken.address.toLowerCase()}`,
+          filter: `base_token=eq.${baseToken.address.toLowerCase()}`,
         },
         (payload) => {
-          const newTrade: Trade = {
-            id: payload.new.id,
-            price: parseFloat(payload.new.price),
-            amount: parseFloat(payload.new.amount),
-            total: parseFloat(payload.new.total),
-            timestamp: new Date(payload.new.timestamp).getTime(),
-            type: payload.new.side as 'buy' | 'sell',
-            txHash: payload.new.tx_hash,
-          };
-          setTrades((prev) => [...prev, newTrade].sort((a, b) => a.timestamp - b.timestamp));
+          console.log('New trade received:', payload.new);
+          const t = payload.new as DbTrade;
+          // Only add if it matches our quote token too
+          if (t.quote_token === quoteToken.address.toLowerCase()) {
+            const newTrade: Trade = {
+              id: t.id,
+              price: t.price,
+              amount: t.base_amount,
+              total: t.quote_amount,
+              timestamp: t.block_timestamp ? new Date(t.block_timestamp).getTime() : Date.now(),
+              type: t.side,
+              txHash: t.tx_hash,
+            };
+            setTrades((prev) => [...prev, newTrade].sort((a, b) => a.timestamp - b.timestamp));
+          }
         }
       )
       .subscribe();
@@ -159,7 +166,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
         supabase.removeChannel(channel);
       }
     };
-  }, [baseToken.address]);
+  }, [baseToken.address, quoteToken.address]);
 
   // Filter trades by time range
   const filteredTrades = useMemo(() => {
@@ -281,7 +288,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
         borderColor: 'rgba(255, 255, 255, 0.1)',
         scaleMargins: {
           top: 0.1,
-          bottom: 0.25, // Leave room for volume
+          bottom: 0.25,
         },
       },
       timeScale: {
@@ -427,11 +434,13 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
             <span className="text-xl font-bold text-white">
               {formatPrice(priceStats.current)}
             </span>
-            <span className={`text-sm font-medium ${
-              priceStats.change >= 0 ? 'text-green-500' : 'text-red-500'
-            }`}>
-              {priceStats.change >= 0 ? '+' : ''}{formatPrice(priceStats.change)} ({priceStats.changePercent.toFixed(2)}%)
-            </span>
+            {priceStats.current > 0 && (
+              <span className={`text-sm font-medium ${
+                priceStats.change >= 0 ? 'text-green-500' : 'text-red-500'
+              }`}>
+                {priceStats.change >= 0 ? '+' : ''}{formatPrice(Math.abs(priceStats.change))} ({priceStats.changePercent.toFixed(2)}%)
+              </span>
+            )}
           </div>
         </div>
 
@@ -496,8 +505,10 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
             <div className="animate-pulse">Loading chart data...</div>
           </div>
         ) : filteredTrades.length === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-            No trades in selected time range
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+            <BarChart3 className="w-12 h-12 mb-2 opacity-50" />
+            <p>No trades in selected time range</p>
+            <p className="text-xs mt-1">Try selecting &quot;ALL&quot; to see historical data</p>
           </div>
         ) : chartType === 'area' ? (
           /* Area Chart (Recharts) */
@@ -523,7 +534,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
                 axisLine={{ stroke: '#374151' }}
                 tickFormatter={(value) => formatPrice(value)}
                 domain={['auto', 'auto']}
-                width={80}
+                width={100}
               />
               <Tooltip
                 contentStyle={{
@@ -533,7 +544,7 @@ export default function TradingChart({ baseToken, quoteToken }: TradingChartProp
                   padding: '8px 12px',
                 }}
                 labelStyle={{ color: '#9ca3af', marginBottom: '4px' }}
-                formatter={(value: number) => [formatPrice(value), 'Price']}
+                formatter={(value: number) => [formatPrice(value) + ' ' + quoteToken.symbol, 'Price']}
               />
               <Area
                 type="monotone"
