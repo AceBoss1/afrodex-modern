@@ -1,21 +1,16 @@
 // components/Leaderboard.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAccount, usePublicClient } from 'wagmi';
 import { ethers } from 'ethers';
 import { 
   Trophy, 
   Medal, 
-  Star, 
-  TrendingUp, 
-  Clock, 
   Gift,
-  ChevronDown,
-  ChevronUp,
   Loader2,
-  ExternalLink,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 import { 
   getStakeInfo, 
@@ -27,33 +22,35 @@ import {
   getAllBadgeTiers,
   getCurrentWeekRange,
   getWeeklyRewardPool,
-  calculateWeightedFees,
   BadgeTier,
   BADGE_TIERS,
 } from '@/lib/staking';
 import { getSupabaseClient } from '@/lib/supabase';
 
-interface LeaderboardEntry {
+interface WeeklyEntry {
   rank: number;
   wallet_address: string;
-  badge_tier: string;
-  badge_emoji: string;
+  badge_tier?: string;
+  badge_emoji?: string;
+  volume_eth: number;
+  trade_count: number;
+  fees_paid_eth: number;
+  gas_fees_eth?: number;
+  platform_fees_eth?: number;
+  multiplier?: number;
+  weighted_fees: number;
+  estimated_reward: number;
+}
+
+interface AllTimeEntry {
+  rank: number;
+  wallet_address: string;
+  badge_tier?: string;
+  badge_emoji?: string;
   total_volume_eth: number;
   trade_count: number;
   total_fees_paid_eth: number;
   total_rewards_earned: number;
-}
-
-interface WeeklyEntry {
-  rank: number;
-  wallet_address: string;
-  badge_tier: string;
-  badge_emoji: string;
-  volume_eth: number;
-  trade_count: number;
-  fees_paid_eth: number;
-  weighted_fees: number;
-  estimated_reward: number;
 }
 
 type TabType = 'weekly' | 'alltime' | 'badges';
@@ -64,8 +61,9 @@ export default function Leaderboard() {
   
   const [activeTab, setActiveTab] = useState<TabType>('weekly');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [weeklyData, setWeeklyData] = useState<WeeklyEntry[]>([]);
-  const [allTimeData, setAllTimeData] = useState<LeaderboardEntry[]>([]);
+  const [allTimeData, setAllTimeData] = useState<AllTimeEntry[]>([]);
   const [userStats, setUserStats] = useState<{
     staked: number;
     badge: BadgeTier;
@@ -76,99 +74,209 @@ export default function Leaderboard() {
   } | null>(null);
   const [weekRange, setWeekRange] = useState<{ start: Date; end: Date } | null>(null);
   const [weeklyPool, setWeeklyPool] = useState(0);
-  const [showBadgeInfo, setShowBadgeInfo] = useState(false);
+  const [totalWeightedFees, setTotalWeightedFees] = useState(0);
+
+  // Calculate week number since program start
+  const getWeekNumber = useCallback(() => {
+    const programStart = new Date('2024-12-20'); // Program start date (first Friday)
+    const now = new Date();
+    const diffTime = now.getTime() - programStart.getTime();
+    const diffWeeks = Math.floor(diffTime / (7 * 24 * 60 * 60 * 1000));
+    return Math.max(1, diffWeeks + 1);
+  }, []);
+
+  // Fetch user's staking info and badge
+  const fetchUserBadge = useCallback(async (walletAddress: string): Promise<{ badge: BadgeTier; staked: number }> => {
+    try {
+      if (publicClient) {
+        const provider = new ethers.BrowserProvider(publicClient as any);
+        const stakeInfo = await getStakeInfo(provider, walletAddress);
+        const badge = getBadgeTier(stakeInfo.stakeBalanceFormatted);
+        return { badge, staked: stakeInfo.stakeBalanceFormatted };
+      }
+    } catch (err) {
+      console.error('Error fetching stake info for', walletAddress, err);
+    }
+    // Default to Starter if can't fetch
+    return { badge: BADGE_TIERS[0], staked: 0 };
+  }, [publicClient]);
 
   // Fetch leaderboard data
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      const supabase = getSupabaseClient();
+  const fetchData = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true);
+    else setRefreshing(true);
+    
+    const supabase = getSupabaseClient();
+    
+    try {
+      // Get current week range
+      const range = getCurrentWeekRange();
+      setWeekRange(range);
       
-      let fetchedWeeklyData: WeeklyEntry[] = [];
-      let fetchedAllTimeData: LeaderboardEntry[] = [];
+      // Get week number and reward pool
+      const weekNum = getWeekNumber();
+      const pool = getWeeklyRewardPool(weekNum);
+      setWeeklyPool(pool);
       
-      try {
-        // Get current week range
-        const range = getCurrentWeekRange();
-        setWeekRange(range);
+      if (supabase) {
+        // Fetch weekly trading stats for current week
+        const weekStartStr = range.start.toISOString().split('T')[0];
         
-        // Week 1 reward pool (assuming program just started)
-        setWeeklyPool(getWeeklyRewardPool(1));
+        const { data: weeklyStats, error: weeklyError } = await supabase
+          .from('weekly_trading_stats')
+          .select('*')
+          .eq('week_start', weekStartStr)
+          .order('volume_eth', { ascending: false });
         
-        if (supabase) {
-          // Fetch all-time leaderboard
-          const { data: allTime } = await supabase
-            .from('leaderboard')
-            .select('*')
-            .limit(50);
-          
-          if (allTime) {
-            fetchedAllTimeData = allTime.map((entry, idx) => ({
-              rank: idx + 1,
-              ...entry,
-            }));
-            setAllTimeData(fetchedAllTimeData);
-          }
-          
-          // Fetch weekly leaderboard
-          const { data: weekly } = await supabase
-            .from('weekly_leaderboard')
-            .select('*')
-            .limit(50);
-          
-          if (weekly) {
-            // Calculate estimated rewards
-            const totalWeightedFees = weekly.reduce((sum, e) => sum + (e.weighted_fees || 0), 0);
-            const pool = getWeeklyRewardPool(1);
+        if (weeklyError) {
+          console.error('Error fetching weekly stats:', weeklyError);
+        }
+
+        if (weeklyStats && weeklyStats.length > 0) {
+          // Calculate weighted fees for each trader in real-time
+          const entriesWithRewards: WeeklyEntry[] = [];
+          let totalWeighted = 0;
+
+          for (const entry of weeklyStats) {
+            // Get badge info for multiplier
+            let multiplier = entry.multiplier || 1;
+            let badgeEmoji = entry.badge_emoji || '🌱';
+            let badgeTier = entry.badge_tier || 'Starter';
             
-            fetchedWeeklyData = weekly.map((entry, idx) => ({
-              rank: idx + 1,
+            // If no cached badge info, try to fetch from profile or use defaults
+            if (!entry.multiplier || entry.multiplier === 0) {
+              const { data: profile } = await supabase
+                .from('user_profiles')
+                .select('badge_tier, badge_emoji, staked_amount')
+                .eq('wallet_address', entry.wallet_address)
+                .single();
+              
+              if (profile) {
+                const badge = getBadgeTier(profile.staked_amount || 0);
+                multiplier = badge.multiplier;
+                badgeEmoji = badge.emoji;
+                badgeTier = badge.name;
+              }
+            }
+
+            // Calculate total fees paid (gas + platform)
+            const totalFees = (entry.gas_fees_eth || 0) + (entry.platform_fees_eth || 0);
+            
+            // Calculate weighted fees = fees × multiplier
+            const weightedFees = totalFees * multiplier;
+            totalWeighted += weightedFees;
+
+            entriesWithRewards.push({
+              rank: 0, // Will set after sorting
+              wallet_address: entry.wallet_address,
+              badge_tier: badgeTier,
+              badge_emoji: badgeEmoji,
+              volume_eth: entry.volume_eth || 0,
+              trade_count: entry.trade_count || 0,
+              fees_paid_eth: totalFees,
+              gas_fees_eth: entry.gas_fees_eth || 0,
+              platform_fees_eth: entry.platform_fees_eth || 0,
+              multiplier: multiplier,
+              weighted_fees: weightedFees,
+              estimated_reward: 0, // Will calculate after we have total
+            });
+          }
+
+          setTotalWeightedFees(totalWeighted);
+
+          // Calculate estimated rewards based on share of total weighted fees
+          const finalEntries = entriesWithRewards
+            .sort((a, b) => b.weighted_fees - a.weighted_fees) // Sort by weighted fees
+            .map((entry, idx) => ({
               ...entry,
-              estimated_reward: totalWeightedFees > 0 
-                ? (entry.weighted_fees / totalWeightedFees) * pool 
+              rank: idx + 1,
+              estimated_reward: totalWeighted > 0
+                ? (entry.weighted_fees / totalWeighted) * pool
                 : 0,
             }));
-            setWeeklyData(fetchedWeeklyData);
+
+          setWeeklyData(finalEntries);
+
+          // Update user stats if connected
+          if (address) {
+            const userEntry = finalEntries.find(e => 
+              e.wallet_address.toLowerCase() === address.toLowerCase()
+            );
+
+            if (userEntry) {
+              const { badge, staked } = await fetchUserBadge(address);
+              setUserStats({
+                staked,
+                badge,
+                weeklyFees: userEntry.fees_paid_eth,
+                weeklyRank: userEntry.rank,
+                allTimeRank: 0,
+                estimatedReward: userEntry.estimated_reward,
+              });
+            } else {
+              // User hasn't traded this week
+              const { badge, staked } = await fetchUserBadge(address);
+              setUserStats({
+                staked,
+                badge,
+                weeklyFees: 0,
+                weeklyRank: 0,
+                allTimeRank: 0,
+                estimatedReward: 0,
+              });
+            }
+          }
+        } else {
+          setWeeklyData([]);
+          // Still fetch user badge even if no trades
+          if (address) {
+            const { badge, staked } = await fetchUserBadge(address);
+            setUserStats({
+              staked,
+              badge,
+              weeklyFees: 0,
+              weeklyRank: 0,
+              allTimeRank: 0,
+              estimatedReward: 0,
+            });
           }
         }
+
+        // Fetch all-time leaderboard from user_profiles
+        const { data: profiles } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .order('total_volume_eth', { ascending: false })
+          .limit(50);
         
-        // Fetch user's staking info
-        if (address && publicClient) {
-          const provider = new ethers.BrowserProvider(publicClient as any);
-          const stakeInfo = await getStakeInfo(provider, address);
-          const badge = getBadgeTier(stakeInfo.stakeBalanceFormatted);
-          
-          // Find user's ranks using local variables
-          const weeklyRank = fetchedWeeklyData.findIndex(e => 
-            e.wallet_address.toLowerCase() === address.toLowerCase()
-          ) + 1;
-          const allTimeRank = fetchedAllTimeData.findIndex(e => 
-            e.wallet_address.toLowerCase() === address.toLowerCase()
-          ) + 1;
-          
-          // Get user's weekly fees
-          const userWeekly = fetchedWeeklyData.find(e => 
-            e.wallet_address.toLowerCase() === address.toLowerCase()
-          );
-          
-          setUserStats({
-            staked: stakeInfo.stakeBalanceFormatted,
-            badge,
-            weeklyFees: userWeekly?.fees_paid_eth || 0,
-            weeklyRank: weeklyRank || 0,
-            allTimeRank: allTimeRank || 0,
-            estimatedReward: userWeekly?.estimated_reward || 0,
-          });
+        if (profiles) {
+          setAllTimeData(profiles.map((entry, idx) => ({
+            rank: idx + 1,
+            wallet_address: entry.wallet_address,
+            badge_tier: entry.badge_tier,
+            badge_emoji: entry.badge_emoji,
+            total_volume_eth: entry.total_volume_eth || 0,
+            trade_count: entry.trade_count || 0,
+            total_fees_paid_eth: (entry.total_gas_fees_eth || 0) + (entry.total_platform_fees_eth || 0),
+            total_rewards_earned: entry.total_rewards_earned || 0,
+          })));
         }
-      } catch (err) {
-        console.error('Error fetching leaderboard:', err);
-      } finally {
-        setLoading(false);
       }
-    };
-    
+    } catch (err) {
+      console.error('Error fetching leaderboard:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [address, publicClient, fetchUserBadge, getWeekNumber]);
+
+  useEffect(() => {
     fetchData();
-  }, [address, publicClient]);
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(() => fetchData(false), 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const formatAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -203,11 +311,21 @@ export default function Leaderboard() {
           <Trophy className="w-5 h-5 text-afrodex-orange" />
           TGIF Leaderboard
         </h2>
-        {weekRange && (
-          <div className="text-xs text-gray-500">
-            Week: {weekRange.start.toLocaleDateString()} - {weekRange.end.toLocaleDateString()}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {weekRange && (
+            <div className="text-xs text-gray-500">
+              Week: {weekRange.start.toLocaleDateString()} - {weekRange.end.toLocaleDateString()}
+            </div>
+          )}
+          <button
+            onClick={() => fetchData(false)}
+            disabled={refreshing}
+            className="p-1 rounded hover:bg-white/10 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 text-gray-400 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* User Stats Card (if connected and staking) */}
@@ -234,6 +352,14 @@ export default function Leaderboard() {
           {!isEligibleForRewards(userStats.staked) ? (
             <div className="text-center py-2 bg-yellow-600/20 rounded text-yellow-400 text-sm">
               ⚠️ Stake at least 1B AfroX to earn TGIF rewards!
+              <a 
+                href="https://defi.afrox.one/?ref=CFBD73A1" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="block mt-1 text-afrodex-orange hover:underline"
+              >
+                Stake at AfroX DeFi-Hub →
+              </a>
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-4 text-center">
@@ -345,7 +471,7 @@ export default function Leaderboard() {
                     {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : entry.rank}
                   </span>
                   <div className="col-span-4 flex items-center gap-2">
-                    <span className="text-lg">{entry.badge_emoji}</span>
+                    <span className="text-lg">{entry.badge_emoji || '🌱'}</span>
                     <span className="font-mono text-xs">
                       {formatAddress(entry.wallet_address)}
                     </span>
@@ -361,6 +487,14 @@ export default function Leaderboard() {
                   </span>
                 </div>
               ))}
+
+              {/* Pool share info */}
+              {totalWeightedFees > 0 && (
+                <div className="mt-4 p-2 bg-gray-800/50 rounded text-xs text-gray-400 text-center">
+                  Total Pool Share Points: {totalWeightedFees.toFixed(6)} • 
+                  Higher badge = Higher multiplier = More rewards!
+                </div>
+              )}
             </>
           )}
         </div>
@@ -398,7 +532,7 @@ export default function Leaderboard() {
                     {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : entry.rank}
                   </span>
                   <div className="col-span-4 flex items-center gap-2">
-                    <span className="text-lg">{entry.badge_emoji}</span>
+                    <span className="text-lg">{entry.badge_emoji || '🌱'}</span>
                     <span className="font-mono text-xs">
                       {formatAddress(entry.wallet_address)}
                     </span>
@@ -466,11 +600,19 @@ export default function Leaderboard() {
               <div className="text-xs text-yellow-400">
                 <strong>How TGIF Rewards Work:</strong>
                 <ul className="mt-1 space-y-1 list-disc list-inside text-yellow-400/80">
-                  <li>Only trade takers (who pay gas) are eligible</li>
+                  <li>Trade takers who pay fees are eligible</li>
                   <li>Rewards = (Your Weighted Fees / Total Weighted Fees) × Pool</li>
                   <li>Weighted Fees = Fees Paid × Your Multiplier</li>
                   <li>Distributed every Friday!</li>
                 </ul>
+                <a 
+                  href="https://defi.afrox.one/?ref=CFBD73A1" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="inline-block mt-2 text-afrodex-orange hover:underline"
+                >
+                  Stake at AfroX DeFi-Hub →
+                </a>
               </div>
             </div>
           </div>
