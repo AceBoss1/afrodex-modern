@@ -11,6 +11,21 @@ import {
 } from 'recharts';
 import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { BarChart3, TrendingUp } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+
+// Token interface (matching your existing Token type)
+interface Token {
+  symbol: string;
+  name: string;
+  address: string;
+  decimals: number;
+  logo?: string;
+  description?: string;
+  website?: string;
+  etherscan?: string;
+  tracker?: string;
+  isCustom?: boolean;
+}
 
 interface Trade {
   id?: string;
@@ -23,9 +38,8 @@ interface Trade {
 }
 
 interface TradingChartProps {
-  trades: Trade[];
-  tokenSymbol: string;
-  baseSymbol?: string;
+  baseToken: Token;
+  quoteToken: Token;
 }
 
 type TimeRange = '1M' | '15M' | '1H' | '24H' | '7D' | 'ALL';
@@ -50,13 +64,83 @@ const TIME_RANGES: Record<TimeRange, { ms: number; bucketMs: number; label: stri
   'ALL': { ms: Infinity, bucketMs: 24 * 60 * 60 * 1000, label: 'All Time' }, // Daily candles
 };
 
-export default function TradingChart({ trades, tokenSymbol, baseSymbol = 'ETH' }: TradingChartProps) {
+export default function TradingChart({ baseToken, quoteToken }: TradingChartProps) {
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [timeRange, setTimeRange] = useState<TimeRange>('24H');
   const [chartType, setChartType] = useState<ChartType>('area');
+  const [isLoading, setIsLoading] = useState(true);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+
+  // Fetch trades from Supabase
+  useEffect(() => {
+    const fetchTrades = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('trades')
+          .select('*')
+          .eq('token_address', baseToken.address.toLowerCase())
+          .order('timestamp', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching trades:', error);
+          return;
+        }
+
+        if (data) {
+          const formattedTrades: Trade[] = data.map((t) => ({
+            id: t.id,
+            price: parseFloat(t.price),
+            amount: parseFloat(t.amount),
+            total: parseFloat(t.total),
+            timestamp: new Date(t.timestamp).getTime(),
+            type: t.side as 'buy' | 'sell',
+            txHash: t.tx_hash,
+          }));
+          setTrades(formattedTrades);
+        }
+      } catch (err) {
+        console.error('Failed to fetch trades:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchTrades();
+
+    // Subscribe to real-time updates
+    const channel = supabase
+      .channel(`trades-${baseToken.address}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'trades',
+          filter: `token_address=eq.${baseToken.address.toLowerCase()}`,
+        },
+        (payload) => {
+          const newTrade: Trade = {
+            id: payload.new.id,
+            price: parseFloat(payload.new.price),
+            amount: parseFloat(payload.new.amount),
+            total: parseFloat(payload.new.total),
+            timestamp: new Date(payload.new.timestamp).getTime(),
+            type: payload.new.side as 'buy' | 'sell',
+            txHash: payload.new.tx_hash,
+          };
+          setTrades((prev) => [...prev, newTrade].sort((a, b) => a.timestamp - b.timestamp));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [baseToken.address]);
 
   // Filter trades by time range
   const filteredTrades = useMemo(() => {
@@ -298,7 +382,7 @@ export default function TradingChart({ trades, tokenSymbol, baseSymbol = 'ETH' }
     };
   }, [filteredTrades]);
 
-  // Format price with appropriate precision
+  // Format price with appropriate precision (15 decimals for micro-prices)
   const formatPrice = (price: number): string => {
     if (price === 0) return '0';
     if (price < 0.000000001) return price.toExponential(4);
@@ -313,12 +397,12 @@ export default function TradingChart({ trades, tokenSymbol, baseSymbol = 'ETH' }
   };
 
   return (
-    <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4">
+    <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 h-full flex flex-col">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div>
           <h3 className="text-lg font-semibold text-white">
-            {tokenSymbol}/{baseSymbol}
+            {baseToken.symbol}/{quoteToken.symbol}
           </h3>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-xl font-bold text-white">
@@ -387,8 +471,12 @@ export default function TradingChart({ trades, tokenSymbol, baseSymbol = 'ETH' }
       </div>
 
       {/* Chart Container */}
-      <div className="h-[400px] relative">
-        {filteredTrades.length === 0 ? (
+      <div className="flex-1 min-h-[300px] relative">
+        {isLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+            <div className="animate-pulse">Loading chart data...</div>
+          </div>
+        ) : filteredTrades.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center text-gray-500">
             No trades in selected time range
           </div>
