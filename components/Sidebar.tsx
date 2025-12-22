@@ -65,10 +65,10 @@ export default function Sidebar() {
       
       try {
         const provider = new ethers.BrowserProvider(publicClient as any);
-        const stakeInfo = await getStakeInfo(provider, address);
-        const badge = getBadgeTier(stakeInfo.stakeBalanceFormatted);
+        const stakeInfo = await getStakeInfo(address, provider);
+        const badge = getBadgeTier(stakeInfo.stakedAmount);
         setUserBadge(badge);
-        setStakedAmount(stakeInfo.stakeBalanceFormatted);
+        setStakedAmount(stakeInfo.stakedAmount);
       } catch (err) {
         console.error('Error fetching badge:', err);
         setUserBadge(null);
