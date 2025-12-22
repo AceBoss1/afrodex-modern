@@ -304,7 +304,7 @@ export default function Leaderboard() {
       <div className="flex items-center justify-between mb-4 p-3 bg-afrodex-black-lighter rounded-lg">
         <div className="flex items-center gap-2">
           <Gift className="w-4 h-4 text-afrodex-orange" />
-          <span className="text-sm text-gray-400">This Week's Reward Pool:</span>
+          <span className="text-sm text-gray-400">This Week&apos;s Reward Pool:</span>
         </div>
         <span className="text-lg font-bold text-trade-buy">
           {formatRewardAmount(weeklyPool)} AfroX
