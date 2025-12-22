@@ -323,32 +323,44 @@ export async function recordTradeStats(
     let multiplier = 1;
     let badgeTier = 'Starter';
     let badgeEmoji = '🌱';
+    let actualStakedAmount = stakedAmount ?? 0;
     
-    if (stakedAmount !== undefined && stakedAmount > 0) {
-      const badge = getBadgeTier(stakedAmount);
+    // If stakedAmount not provided, fetch from blockchain
+    if (stakedAmount === undefined || stakedAmount === 0) {
+      try {
+        // Dynamic import to avoid circular dependencies
+        const { getStakeInfo } = await import('./staking');
+        const stakeInfo = await getStakeInfo(wallet);
+        actualStakedAmount = stakeInfo.stakedAmount;
+        console.log('Fetched staking balance from blockchain:', actualStakedAmount);
+      } catch (err) {
+        console.log('Could not fetch staking balance, checking profile:', err);
+        // Fallback to profile
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('staked_amount, badge_tier, badge_emoji')
+          .eq('wallet_address', wallet)
+          .single();
+        
+        if (profile && profile.staked_amount) {
+          actualStakedAmount = profile.staked_amount;
+        }
+      }
+    }
+    
+    // Calculate badge based on actual staked amount
+    if (actualStakedAmount > 0) {
+      const badge = getBadgeTier(actualStakedAmount);
       multiplier = badge.multiplier;
       badgeTier = badge.name;
       badgeEmoji = badge.emoji;
-    } else {
-      // Try to get from user profile
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('staked_amount, badge_tier, badge_emoji')
-        .eq('wallet_address', wallet)
-        .single();
-      
-      if (profile && profile.staked_amount && profile.staked_amount > 0) {
-        const badge = getBadgeTier(profile.staked_amount);
-        multiplier = badge.multiplier;
-        badgeTier = badge.name;
-        badgeEmoji = badge.emoji;
-      }
     }
     
     const totalFees = gasFeeEth + platformFeeEth;
     const weightedFees = totalFees * multiplier;
     
     console.log('Badge tier:', badgeTier, 'Multiplier:', multiplier);
+    console.log('Staked amount:', actualStakedAmount);
     console.log('Total fees:', totalFees, 'Weighted fees:', weightedFees);
 
     // First try RPC function
@@ -375,6 +387,9 @@ export async function recordTradeStats(
     } else {
       console.log('RPC update_trade_stats succeeded');
     }
+    
+    // Always update user profile with staking info
+    await updateUserProfileWithStaking(wallet, actualStakedAmount, badgeTier, badgeEmoji, gasFeeEth, platformFeeEth, volumeEth);
 
     console.log('=== TGIF STATS RECORDED ===');
     return true;
@@ -463,7 +478,65 @@ async function recordTradeStatsDirect(
 }
 
 /**
- * Update user_profiles with cumulative stats
+ * Update user_profiles with cumulative stats AND staking info
+ */
+async function updateUserProfileWithStaking(
+  wallet: string,
+  stakedAmount: number,
+  badgeTier: string,
+  badgeEmoji: string,
+  gasFeeEth: number,
+  platformFeeEth: number,
+  volumeEth: number
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  const totalFees = gasFeeEth + platformFeeEth;
+
+  // Check if profile exists
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('wallet_address', wallet)
+    .single();
+
+  if (profile) {
+    // Update existing profile with staking info and trade stats
+    await supabase
+      .from('user_profiles')
+      .update({
+        staked_amount: stakedAmount,
+        badge_tier: badgeTier,
+        badge_emoji: badgeEmoji,
+        total_volume_eth: (profile.total_volume_eth || 0) + volumeEth,
+        total_fees_paid_eth: (profile.total_fees_paid_eth || 0) + totalFees,
+        trade_count: (profile.trade_count || 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('wallet_address', wallet);
+      
+    console.log('Updated user profile with staking info:', wallet, badgeTier, stakedAmount);
+  } else {
+    // Create new profile with staking info
+    await supabase
+      .from('user_profiles')
+      .insert({
+        wallet_address: wallet,
+        staked_amount: stakedAmount,
+        badge_tier: badgeTier,
+        badge_emoji: badgeEmoji,
+        total_volume_eth: volumeEth,
+        total_fees_paid_eth: totalFees,
+        trade_count: 1,
+      });
+      
+    console.log('Created new user profile with staking info:', wallet, badgeTier, stakedAmount);
+  }
+}
+
+/**
+ * Update user_profiles with cumulative stats (legacy - called by recordTradeStatsDirect)
  */
 async function updateUserProfileStats(
   wallet: string,
