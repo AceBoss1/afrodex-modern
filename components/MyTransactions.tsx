@@ -1,10 +1,10 @@
 // components/MyTransactions.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { ethers, Contract } from 'ethers';
-import { History, FileText, Wallet, X, Loader2, ExternalLink, AlertCircle, Trash2 } from 'lucide-react';
+import { History, FileText, Wallet, X, Loader2, ExternalLink, AlertCircle, Trash2, ArrowDownLeft, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { Token, ZERO_ADDRESS } from '@/lib/tokens';
 import { EXCHANGE_ADDRESS, formatAmount, cancelOrder as cancelOrderOnChain } from '@/lib/exchange';
 import { EXCHANGE_ABI } from '@/lib/abi';
@@ -45,6 +45,16 @@ interface UserTrade {
   isMaker: boolean;
 }
 
+interface FundMovement {
+  type: 'deposit' | 'withdraw';
+  txHash: string;
+  timestamp: number;
+  token: string;
+  tokenSymbol: string;
+  amount: number;
+  blockNumber: number;
+}
+
 type Tab = 'trades' | 'orders' | 'funds';
 
 // Format price with 15 decimals for very small prices
@@ -69,6 +79,16 @@ function formatAmount15(amount: number): string {
   return amount.toFixed(15);
 }
 
+// Known tokens for symbol lookup
+const TOKEN_SYMBOLS: Record<string, { symbol: string; decimals: number }> = {
+  '0x0000000000000000000000000000000000000000': { symbol: 'ETH', decimals: 18 },
+  '0x08130635368aa28b217a4dfb68e1bf8dc525621c': { symbol: 'AfroX', decimals: 4 },
+  '0x203f8c9ee75cb6d6e6ce4cf6027b3eb39e92736e': { symbol: 'AFDLT', decimals: 18 },
+  '0x1ab43204a195a0fd37edec621482afd3792ef90b': { symbol: 'FARM', decimals: 18 },
+  '0xdd1ad9a21ce722c151a836373babe42c868ce9a4': { symbol: 'FREE', decimals: 18 },
+  '0x8ca6841d30ba69afbffb5fbccd8e4f5c30e21ee4': { symbol: 'PLAAS', decimals: 18 },
+};
+
 export default function MyTransactions({ baseToken, quoteToken }: MyTransactionsProps) {
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
@@ -78,7 +98,9 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
   const [activeTab, setActiveTab] = useState<Tab>('orders');
   const [userOrders, setUserOrders] = useState<UserOrder[]>([]);
   const [userTrades, setUserTrades] = useState<UserTrade[]>([]);
+  const [fundMovements, setFundMovements] = useState<FundMovement[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fundsLoading, setFundsLoading] = useState(false);
   const [cancellingOrder, setCancellingOrder] = useState<string | null>(null);
   const [clearingAll, setClearingAll] = useState(false);
 
@@ -173,6 +195,96 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
 
     fetchUserTrades();
   }, [address, baseToken.address]);
+
+  // Fetch fund movements (deposits and withdrawals)
+  const fetchFundMovements = useCallback(async () => {
+    if (!address || !publicClient) {
+      setFundMovements([]);
+      return;
+    }
+
+    setFundsLoading(true);
+
+    try {
+      const provider = new ethers.BrowserProvider(publicClient as any);
+      const contract = new Contract(EXCHANGE_ADDRESS, EXCHANGE_ABI, provider);
+
+      // Get current block
+      const currentBlock = await provider.getBlockNumber();
+      // Look back ~30 days of blocks (assuming ~12 second blocks)
+      const fromBlock = Math.max(0, currentBlock - 216000);
+
+      console.log('Fetching fund movements from block', fromBlock, 'to', currentBlock);
+
+      // Fetch Deposit events for both ETH and tokens
+      // Deposit(address indexed token, address indexed user, uint256 amount, uint256 balance)
+      const depositFilter = contract.filters.Deposit(null, address);
+      const depositEvents = await contract.queryFilter(depositFilter, fromBlock, currentBlock);
+
+      // Fetch Withdraw events for both ETH and tokens
+      // Withdraw(address indexed token, address indexed user, uint256 amount, uint256 balance)
+      const withdrawFilter = contract.filters.Withdraw(null, address);
+      const withdrawEvents = await contract.queryFilter(withdrawFilter, fromBlock, currentBlock);
+
+      console.log('Found', depositEvents.length, 'deposits and', withdrawEvents.length, 'withdrawals');
+
+      // Process deposit events
+      const deposits: FundMovement[] = await Promise.all(
+        depositEvents.map(async (event: any) => {
+          const block = await event.getBlock();
+          const tokenAddr = event.args[0].toLowerCase();
+          const tokenInfo = TOKEN_SYMBOLS[tokenAddr] || { symbol: 'TOKEN', decimals: 18 };
+          
+          return {
+            type: 'deposit' as const,
+            txHash: event.transactionHash,
+            timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
+            token: tokenAddr,
+            tokenSymbol: tokenAddr === ZERO_ADDRESS.toLowerCase() ? 'ETH' : tokenInfo.symbol,
+            amount: Number(ethers.formatUnits(event.args[2], tokenInfo.decimals)),
+            blockNumber: event.blockNumber,
+          };
+        })
+      );
+
+      // Process withdraw events
+      const withdrawals: FundMovement[] = await Promise.all(
+        withdrawEvents.map(async (event: any) => {
+          const block = await event.getBlock();
+          const tokenAddr = event.args[0].toLowerCase();
+          const tokenInfo = TOKEN_SYMBOLS[tokenAddr] || { symbol: 'TOKEN', decimals: 18 };
+          
+          return {
+            type: 'withdraw' as const,
+            txHash: event.transactionHash,
+            timestamp: block?.timestamp || Math.floor(Date.now() / 1000),
+            token: tokenAddr,
+            tokenSymbol: tokenAddr === ZERO_ADDRESS.toLowerCase() ? 'ETH' : tokenInfo.symbol,
+            amount: Number(ethers.formatUnits(event.args[2], tokenInfo.decimals)),
+            blockNumber: event.blockNumber,
+          };
+        })
+      );
+
+      // Combine and sort by block number (newest first)
+      const allMovements = [...deposits, ...withdrawals].sort((a, b) => b.blockNumber - a.blockNumber);
+      
+      console.log('Total fund movements:', allMovements.length);
+      setFundMovements(allMovements);
+    } catch (err) {
+      console.error('Error fetching fund movements:', err);
+      setFundMovements([]);
+    } finally {
+      setFundsLoading(false);
+    }
+  }, [address, publicClient]);
+
+  // Fetch funds when tab changes to funds
+  useEffect(() => {
+    if (activeTab === 'funds' && address) {
+      fetchFundMovements();
+    }
+  }, [activeTab, address, fetchFundMovements]);
 
   // Clear ALL orders for user
   const handleClearAll = async () => {
@@ -447,9 +559,66 @@ export default function MyTransactions({ baseToken, quoteToken }: MyTransactions
 
         {/* Funds Tab */}
         {activeTab === 'funds' && (
-          <div className="text-center py-6 text-gray-500 text-xs">
-            Fund movements will appear here
-          </div>
+          <>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500">Recent deposits & withdrawals</span>
+              <button
+                onClick={fetchFundMovements}
+                disabled={fundsLoading}
+                className="p-1 hover:bg-white/10 rounded transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw className={`w-3 h-3 text-gray-400 ${fundsLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            {fundsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-afrodex-orange" />
+              </div>
+            ) : fundMovements.length === 0 ? (
+              <div className="text-center py-6 text-gray-500 text-xs">
+                No deposits or withdrawals found
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {fundMovements.map((movement, i) => (
+                  <div 
+                    key={`${movement.txHash}-${i}`} 
+                    className="flex items-center justify-between p-2 bg-afrodex-black-lighter rounded text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      {movement.type === 'deposit' ? (
+                        <ArrowDownLeft className="w-4 h-4 text-trade-buy" />
+                      ) : (
+                        <ArrowUpRight className="w-4 h-4 text-trade-sell" />
+                      )}
+                      <div>
+                        <span className={`font-semibold ${movement.type === 'deposit' ? 'text-trade-buy' : 'text-trade-sell'}`}>
+                          {movement.type === 'deposit' ? 'Deposit' : 'Withdraw'}
+                        </span>
+                        <span className="text-gray-500 ml-2">{formatTime(movement.timestamp)}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono">
+                        {movement.type === 'deposit' ? '+' : '-'}
+                        {formatAmount15(movement.amount)} {movement.tokenSymbol}
+                      </span>
+                      <a 
+                        href={`https://etherscan.io/tx/${movement.txHash}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-afrodex-orange hover:text-afrodex-orange-light"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
