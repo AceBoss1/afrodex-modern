@@ -576,7 +576,99 @@ export async function getAllTimeLeaderboard(): Promise<AllTimeLeaderboardEntry[]
   return data || [];
 }
 
-export default {
+// ============================================
+// Additional Order/Trade Functions (for compatibility)
+// ============================================
+
+/**
+ * Deactivate order by nonce and user address
+ */
+export async function deactivateOrderByNonceAndUser(
+  nonce: string,
+  userAddress: string
+): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const { error } = await supabase
+    .from('orders')
+    .update({ is_active: false })
+    .eq('nonce', nonce)
+    .eq('user_address', userAddress.toLowerCase());
+
+  return !error;
+}
+
+/**
+ * Save a signed order to the database
+ */
+export async function saveSignedOrder(order: DbOrder): Promise<boolean> {
+  return saveOrder(order);
+}
+
+/**
+ * Get orders from database (alias for getActiveOrders with more flexibility)
+ */
+export async function getOrdersFromDb(
+  baseToken: string,
+  quoteToken?: string
+): Promise<DbOrder[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  let query = supabase
+    .from('orders')
+    .select('*')
+    .eq('base_token', baseToken.toLowerCase())
+    .eq('is_active', true)
+    .eq('is_cancelled', false)
+    .order('created_at', { ascending: false });
+
+  if (quoteToken) {
+    query = query.eq('quote_token', quoteToken.toLowerCase());
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching orders from db:', error);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Get trades from database
+ */
+export async function getTradesFromDb(
+  baseToken: string,
+  quoteToken?: string,
+  limit: number = 50
+): Promise<DbTrade[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  let query = supabase
+    .from('trades')
+    .select('*')
+    .eq('base_token', baseToken.toLowerCase())
+    .order('block_number', { ascending: false })
+    .limit(limit);
+
+  if (quoteToken) {
+    query = query.eq('quote_token', quoteToken.toLowerCase());
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching trades from db:', error);
+    return [];
+  }
+  return data || [];
+}
+
+const supabaseExports = {
   getSupabaseClient,
   saveOrder,
   getActiveOrders,
@@ -590,4 +682,10 @@ export default {
   recordTradeStats,
   getWeeklyLeaderboard,
   getAllTimeLeaderboard,
+  deactivateOrderByNonceAndUser,
+  saveSignedOrder,
+  getOrdersFromDb,
+  getTradesFromDb,
 };
+
+export default supabaseExports;
