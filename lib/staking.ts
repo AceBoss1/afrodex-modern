@@ -256,7 +256,7 @@ export function getProgressToNextTier(stakedAmount: number): {
   };
 }
 
-export default {
+const stakingExports = {
   AFROX_CONTRACT,
   AFROX_DECIMALS,
   STAKING_ABI,
@@ -279,3 +279,5 @@ export default {
   isEligibleForRewards,
   getProgressToNextTier,
 };
+
+export default stakingExports;
