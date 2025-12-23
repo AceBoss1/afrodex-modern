@@ -659,16 +659,18 @@ async function updateUserProfile(
 // Leaderboard Functions
 // ============================================
 
-export async function getWeeklyLeaderboard(weekStart: string): Promise<WeeklyLeaderboardEntry[]> {
+export async function getWeeklyLeaderboard(weekStart?: string): Promise<WeeklyLeaderboardEntry[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
-  console.log('Fetching weekly leaderboard for week:', weekStart);
+  // If no weekStart provided, get current week
+  const effectiveWeekStart = weekStart || getCurrentWeekRange().weekStartStr;
+  console.log('Fetching weekly leaderboard for week:', effectiveWeekStart);
 
   const { data, error } = await supabase
     .from('weekly_trading_stats')
     .select('*')
-    .eq('week_start', weekStart)
+    .eq('week_start', effectiveWeekStart)
     .order('weighted_fees', { ascending: false });
 
   if (error) {
