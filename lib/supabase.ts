@@ -180,12 +180,22 @@ export async function deactivateOrderByHash(orderHash: string): Promise<boolean>
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  const { error } = await supabase
+  const hashLower = orderHash.toLowerCase();
+  console.log('Deactivating order in DB:', hashLower);
+
+  const { data, error } = await supabase
     .from('orders')
     .update({ is_active: false })
-    .eq('order_hash', orderHash);
+    .eq('order_hash', hashLower)
+    .select();
 
-  return !error;
+  if (error) {
+    console.error('Error deactivating order:', error);
+    return false;
+  }
+  
+  console.log('Deactivate result - rows affected:', data?.length || 0);
+  return (data?.length || 0) > 0;
 }
 
 export async function updateOrderFilled(
@@ -196,13 +206,15 @@ export async function updateOrderFilled(
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
+  const hashLower = orderHash.toLowerCase();
+
   const { error } = await supabase
     .from('orders')
     .update({ 
       amount_filled: String(amountFilled),
       is_active: !fullyFilled
     })
-    .eq('order_hash', orderHash);
+    .eq('order_hash', hashLower);
 
   return !error;
 }
