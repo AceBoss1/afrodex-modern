@@ -684,8 +684,29 @@ export async function deactivateOrderByNonceAndUser(
 /**
  * Save a signed order to the database
  */
-export async function saveSignedOrder(order: DbOrder): Promise<boolean> {
-  return saveOrder(order);
+export async function saveSignedOrder(order: DbOrder): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { success: false, error: 'Supabase not configured' };
+  }
+
+  // Set default values for optional fields
+  const orderWithDefaults = {
+    ...order,
+    is_active: order.is_active ?? true,
+    is_cancelled: order.is_cancelled ?? false,
+    amount_filled: order.amount_filled ?? 0,
+  };
+
+  const { error } = await supabase
+    .from('orders')
+    .upsert(orderWithDefaults, { onConflict: 'order_hash' });
+
+  if (error) {
+    console.error('Error saving signed order:', error);
+    return { success: false, error: error.message };
+  }
+  return { success: true };
 }
 
 /**
