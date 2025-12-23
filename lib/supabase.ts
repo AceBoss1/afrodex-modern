@@ -100,9 +100,28 @@ export async function saveOrder(order: DbOrder): Promise<boolean> {
     amount_filled: order.amount_filled ?? '0',
   };
 
-  const { error } = await supabase
+  // Check if order already exists
+  const { data: existing } = await supabase
     .from('orders')
-    .upsert(orderWithDefaults, { onConflict: 'order_hash' });
+    .select('order_hash')
+    .eq('order_hash', order.order_hash)
+    .single();
+
+  let error;
+  if (existing) {
+    // Update existing
+    const result = await supabase
+      .from('orders')
+      .update(orderWithDefaults)
+      .eq('order_hash', order.order_hash);
+    error = result.error;
+  } else {
+    // Insert new
+    const result = await supabase
+      .from('orders')
+      .insert(orderWithDefaults);
+    error = result.error;
+  }
 
   if (error) {
     console.error('Error saving order:', error);
@@ -193,9 +212,30 @@ export async function saveTrade(trade: DbTrade): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  const { error } = await supabase
+  // Check if trade already exists
+  const { data: existing } = await supabase
     .from('trades')
-    .upsert(trade, { onConflict: 'tx_hash,log_index' });
+    .select('tx_hash')
+    .eq('tx_hash', trade.tx_hash)
+    .eq('log_index', trade.log_index)
+    .single();
+
+  let error;
+  if (existing) {
+    // Update existing
+    const result = await supabase
+      .from('trades')
+      .update(trade)
+      .eq('tx_hash', trade.tx_hash)
+      .eq('log_index', trade.log_index);
+    error = result.error;
+  } else {
+    // Insert new
+    const result = await supabase
+      .from('trades')
+      .insert(trade);
+    error = result.error;
+  }
 
   if (error) {
     console.error('Error saving trade:', error);
@@ -265,9 +305,30 @@ export async function saveTradeAfterExecution(
     quote_amount: trade.quoteAmount,
   };
 
-  const { error } = await supabase
+  // Check if trade already exists
+  const { data: existing } = await supabase
     .from('trades')
-    .upsert(dbTrade, { onConflict: 'tx_hash,log_index' });
+    .select('tx_hash')
+    .eq('tx_hash', trade.txHash)
+    .eq('log_index', 0)
+    .single();
+
+  let error;
+  if (existing) {
+    // Update existing
+    const result = await supabase
+      .from('trades')
+      .update(dbTrade)
+      .eq('tx_hash', trade.txHash)
+      .eq('log_index', 0);
+    error = result.error;
+  } else {
+    // Insert new
+    const result = await supabase
+      .from('trades')
+      .insert(dbTrade);
+    error = result.error;
+  }
 
   if (error) {
     console.error('Error saving trade after execution:', error);
@@ -698,14 +759,36 @@ export async function saveSignedOrder(order: DbOrder): Promise<{ success: boolea
     amount_filled: order.amount_filled ?? '0',
   };
 
-  const { error } = await supabase
+  // First check if order already exists
+  const { data: existing } = await supabase
     .from('orders')
-    .upsert(orderWithDefaults, { onConflict: 'order_hash' });
+    .select('order_hash')
+    .eq('order_hash', order.order_hash)
+    .single();
 
-  if (error) {
-    console.error('Error saving signed order:', error);
-    return { success: false, error: error.message };
+  if (existing) {
+    // Update existing order
+    const { error } = await supabase
+      .from('orders')
+      .update(orderWithDefaults)
+      .eq('order_hash', order.order_hash);
+
+    if (error) {
+      console.error('Error updating signed order:', error);
+      return { success: false, error: error.message };
+    }
+  } else {
+    // Insert new order
+    const { error } = await supabase
+      .from('orders')
+      .insert(orderWithDefaults);
+
+    if (error) {
+      console.error('Error inserting signed order:', error);
+      return { success: false, error: error.message };
+    }
   }
+  
   return { success: true };
 }
 
