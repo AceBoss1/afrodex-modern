@@ -229,25 +229,37 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       
       // === CRITICAL: Post-trade updates ===
       
-      // Calculate gas fee in ETH for TGIF rewards
-      let gasFeeEth = 0;
-      if (receipt && receipt.gasUsed && receipt.gasPrice) {
-        gasFeeEth = Number(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
-      } else if (receipt && receipt.gasUsed) {
-        // Fallback: estimate gas price
-        const gasPrice = await provider.getFeeData();
-        if (gasPrice.gasPrice) {
-          gasFeeEth = Number(ethers.formatEther(receipt.gasUsed * gasPrice.gasPrice));
+      // Calculate gas fee in ETH for TGIF rewards (with fallback)
+      let gasFeeEth = 0.0003; // Default estimate for a trade
+      try {
+        if (receipt && receipt.gasUsed && receipt.gasPrice) {
+          gasFeeEth = Number(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
+        } else if (receipt && receipt.gasUsed) {
+          // Fallback: use estimated gas price
+          try {
+            const gasPrice = await provider.getFeeData();
+            if (gasPrice.gasPrice) {
+              gasFeeEth = Number(ethers.formatEther(receipt.gasUsed * gasPrice.gasPrice));
+            }
+          } catch (feeErr) {
+            console.warn('Could not get fee data, using default');
+          }
         }
+      } catch (gasErr) {
+        console.warn('Gas fee calculation error, using default:', gasErr);
       }
       console.log('Gas fee ETH:', gasFeeEth);
       
       // 1. Deactivate/update the order in Supabase
       const orderHash = order.hash;
       if (orderHash) {
-        console.log('Deactivating order:', orderHash);
-        const deactivated = await deactivateOrderByHash(orderHash);
-        console.log('Order deactivated:', deactivated);
+        try {
+          console.log('Deactivating order:', orderHash);
+          const deactivated = await deactivateOrderByHash(orderHash);
+          console.log('Order deactivated:', deactivated);
+        } catch (deactErr) {
+          console.error('Error deactivating order:', deactErr);
+        }
       }
       
       // 2. Remove order from local state immediately
@@ -277,27 +289,31 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       
       // 5. Save trade to Supabase (this also records TGIF stats)
       console.log('Saving trade to Supabase...');
-      const saveResult = await saveTradeAfterExecution(
-        {
-          txHash: tx.hash,
-          tokenGet: order.tokenGet,
-          amountGet: order.amountGet,
-          tokenGive: order.tokenGive,
-          amountGive: order.amountGive,
-          maker: order.user,
-          taker: address!,
-          blockNumber: receipt?.blockNumber || 0,
-          blockTimestamp: new Date().toISOString(),
-          baseToken: baseToken.address,
-          quoteToken: quoteToken.address,
-          side: isSellOrder ? 'buy' : 'sell',
-          price: aggregatedOrder.price,
-          baseAmount: baseAmount,
-          quoteAmount: quoteAmount,
-        },
-        gasFeeEth  // Pass gas fee for TGIF rewards calculation
-      );
-      console.log('Trade save result:', saveResult);
+      try {
+        const saveResult = await saveTradeAfterExecution(
+          {
+            txHash: tx.hash,
+            tokenGet: order.tokenGet,
+            amountGet: order.amountGet,
+            tokenGive: order.tokenGive,
+            amountGive: order.amountGive,
+            maker: order.user,
+            taker: address!,
+            blockNumber: receipt?.blockNumber || 0,
+            blockTimestamp: new Date().toISOString(),
+            baseToken: baseToken.address,
+            quoteToken: quoteToken.address,
+            side: isSellOrder ? 'buy' : 'sell',
+            price: aggregatedOrder.price,
+            baseAmount: baseAmount,
+            quoteAmount: quoteAmount,
+          },
+          gasFeeEth  // Pass gas fee for TGIF rewards calculation
+        );
+        console.log('Trade save result:', saveResult);
+      } catch (saveErr) {
+        console.error('Error saving trade to Supabase:', saveErr);
+      }
       
       // 6. Add trade to local state for immediate UI update
       addTrade({
