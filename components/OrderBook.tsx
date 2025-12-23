@@ -7,7 +7,7 @@ import { ethers } from 'ethers';
 import { useTradingStore, useUIStore } from '@/lib/store';
 import { formatAmount, formatOrderBookPrice, formatOrderBookAmount, executeTrade, SignedOrder, preTradeCheck } from '@/lib/exchange';
 import { Token, ZERO_ADDRESS } from '@/lib/tokens';
-import { deactivateOrderByHash, deactivateOrderByNonceAndUser, saveTradeAfterExecution } from '@/lib/supabase';
+import { deactivateOrderByHash, updateOrderFilled, saveTradeAfterExecution } from '@/lib/supabase';
 import { ArrowDown, ArrowUp, BookOpen, Loader2 } from 'lucide-react';
 
 interface OrderBookProps {
@@ -30,6 +30,8 @@ interface OrderData {
   s?: string;
   hash?: string;
   availableVolume?: string;
+  amountFilled?: string;
+  created_at?: string;
 }
 
 interface AggregatedOrder {
@@ -56,7 +58,14 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
     const aggregateByPrice = (orders: typeof buyOrders, isBuy: boolean): AggregatedOrder[] => {
       const priceMap = new Map<string, AggregatedOrder>();
       
-      orders.forEach(order => {
+      // Sort orders by created_at (first come first served)
+      const sortedOrders = [...orders].sort((a, b) => {
+        const aTime = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+        const bTime = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+        return aTime - bTime; // Oldest first
+      });
+      
+      sortedOrders.forEach(order => {
         const amount = parseFloat(formatAmount(
           isBuy ? order.amountGet : order.amountGive,
           baseToken.decimals
@@ -126,15 +135,39 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
 
   const lastTrade = trades.length > 0 ? trades[0] : null;
 
-  // Handle clicking on an aggregated order row - execute against the best order at that price
+  // Find the first executable order (not owned by current user)
+  const findExecutableOrder = (orders: OrderData[]): OrderData | null => {
+    for (const order of orders) {
+      // Skip orders without valid signature
+      if (!order.v || !order.r || !order.s) continue;
+      // Skip user's own orders
+      if (order.user?.toLowerCase() === address?.toLowerCase()) continue;
+      // Found a valid order
+      return order;
+    }
+    return null;
+  };
+
+  // Handle clicking on an aggregated order row
   const handleOrderClick = async (aggregatedOrder: AggregatedOrder, isSellOrder: boolean) => {
-    // Get the first order with a valid signature at this price level
-    const order = aggregatedOrder.orders.find(o => o.v && o.r && o.s);
+    // Find the first executable order at this price level (skipping user's own orders)
+    const order = findExecutableOrder(aggregatedOrder.orders);
     
     if (!order) {
+      // If all orders at this price are user's own, just set the price for new order
       setSelectedPrice(aggregatedOrder.price.toString());
       setOrderTab(isSellOrder ? 'buy' : 'sell');
-      setExecuteError('No executable orders at this price - place a new order');
+      
+      // Check if there are only user's own orders
+      const hasOwnOrders = aggregatedOrder.orders.some(o => 
+        o.user?.toLowerCase() === address?.toLowerCase()
+      );
+      
+      if (hasOwnOrders) {
+        setExecuteError("All orders at this price are yours - can't self-trade");
+      } else {
+        setExecuteError('No executable orders at this price - place a new order');
+      }
       setTimeout(() => setExecuteError(null), 3000);
       return;
     }
@@ -147,13 +180,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
       return;
     }
 
-    if (order.user?.toLowerCase() === address?.toLowerCase()) {
-      setExecuteError("Can't take your own order");
-      setTimeout(() => setExecuteError(null), 3000);
-      return;
-    }
-
-    const orderKey = `${order.nonce}-${order.expires}`;
+    const orderKey = order.hash || `${order.nonce}-${order.expires}`;
     setExecutingOrder(orderKey);
     setExecuteError(null);
 
@@ -177,6 +204,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
 
       const amountToTrade = order.availableVolume || order.amountGet;
       
+      // Pre-trade validation
       const preCheck = await preTradeCheck(provider, signedOrder, amountToTrade, address!);
       
       if (!preCheck.canTrade) {
@@ -186,24 +214,48 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         return;
       }
       
+      console.log('=== EXECUTING TRADE ===');
+      console.log('Order hash:', order.hash);
+      console.log('Maker:', order.user);
+      console.log('Taker:', address);
+      console.log('Amount:', amountToTrade);
+      
+      // Execute the trade on-chain
       const tx = await executeTrade(signer, signedOrder, amountToTrade);
+      console.log('Trade TX sent:', tx.hash);
+      
       const receipt = await tx.wait();
+      console.log('Trade TX confirmed, block:', receipt?.blockNumber);
       
-      // === CRITICAL: Update order and record trade after successful execution ===
+      // === CRITICAL: Post-trade updates ===
       
-      // 1. Deactivate the order in Supabase
-      if (order.hash) {
-        await deactivateOrderByHash(order.hash);
-      } else if (order.nonce && order.user) {
-        await deactivateOrderByNonceAndUser(order.nonce, order.user);
+      // Calculate gas fee in ETH for TGIF rewards
+      let gasFeeEth = 0;
+      if (receipt && receipt.gasUsed && receipt.gasPrice) {
+        gasFeeEth = Number(ethers.formatEther(receipt.gasUsed * receipt.gasPrice));
+      } else if (receipt && receipt.gasUsed) {
+        // Fallback: estimate gas price
+        const gasPrice = await provider.getFeeData();
+        if (gasPrice.gasPrice) {
+          gasFeeEth = Number(ethers.formatEther(receipt.gasUsed * gasPrice.gasPrice));
+        }
+      }
+      console.log('Gas fee ETH:', gasFeeEth);
+      
+      // 1. Deactivate/update the order in Supabase
+      const orderHash = order.hash;
+      if (orderHash) {
+        console.log('Deactivating order:', orderHash);
+        const deactivated = await deactivateOrderByHash(orderHash);
+        console.log('Order deactivated:', deactivated);
       }
       
-      // 2. Remove order from local state
-      if (order.hash) {
-        removeOrder(order.hash);
+      // 2. Remove order from local state immediately
+      if (orderHash) {
+        removeOrder(orderHash);
       }
       
-      // Filter out the executed order
+      // 3. Filter out the executed order from store
       const updatedBuyOrders = buyOrders.filter(o => 
         !(o.nonce === order.nonce && o.user?.toLowerCase() === order.user?.toLowerCase())
       );
@@ -211,8 +263,9 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         !(o.nonce === order.nonce && o.user?.toLowerCase() === order.user?.toLowerCase())
       );
       setOrders(updatedBuyOrders, updatedSellOrders);
+      console.log('Local orders updated');
       
-      // 3. Record the trade in Supabase
+      // 4. Calculate trade amounts for recording
       const baseAmount = parseFloat(formatAmount(
         isSellOrder ? order.amountGive : order.amountGet,
         baseToken.decimals
@@ -222,25 +275,31 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         quoteToken.decimals
       ));
       
-      await saveTradeAfterExecution({
-        txHash: tx.hash,
-        tokenGet: order.tokenGet,
-        amountGet: order.amountGet,
-        tokenGive: order.tokenGive,
-        amountGive: order.amountGive,
-        maker: order.user,
-        taker: address!,
-        blockNumber: receipt?.blockNumber || 0,
-        blockTimestamp: new Date().toISOString(),
-        baseToken: baseToken.address,
-        quoteToken: quoteToken.address,
-        side: isSellOrder ? 'buy' : 'sell',
-        price: aggregatedOrder.price,
-        baseAmount: baseAmount,
-        quoteAmount: quoteAmount,
-      });
+      // 5. Save trade to Supabase (this also records TGIF stats)
+      console.log('Saving trade to Supabase...');
+      const saveResult = await saveTradeAfterExecution(
+        {
+          txHash: tx.hash,
+          tokenGet: order.tokenGet,
+          amountGet: order.amountGet,
+          tokenGive: order.tokenGive,
+          amountGive: order.amountGive,
+          maker: order.user,
+          taker: address!,
+          blockNumber: receipt?.blockNumber || 0,
+          blockTimestamp: new Date().toISOString(),
+          baseToken: baseToken.address,
+          quoteToken: quoteToken.address,
+          side: isSellOrder ? 'buy' : 'sell',
+          price: aggregatedOrder.price,
+          baseAmount: baseAmount,
+          quoteAmount: quoteAmount,
+        },
+        gasFeeEth  // Pass gas fee for TGIF rewards calculation
+      );
+      console.log('Trade save result:', saveResult);
       
-      // 4. Add trade to local state
+      // 6. Add trade to local state for immediate UI update
       addTrade({
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber || 0,
@@ -257,12 +316,16 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         quoteAmount: quoteAmount,
       });
       
+      console.log('=== TRADE COMPLETE ===');
+      
     } catch (err: any) {
       console.error('Trade execution error:', err);
       if (err.code === 'ACTION_REJECTED') {
         setExecuteError('Transaction rejected');
       } else if (err.reason) {
         setExecuteError(err.reason);
+      } else if (err.message?.includes('insufficient')) {
+        setExecuteError('Insufficient balance');
       } else {
         setExecuteError(err.message || 'Trade failed');
       }
@@ -307,7 +370,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         <span className="text-right">Total</span>
       </div>
 
-      {/* Sell Orders */}
+      {/* Sell Orders (asks) - displayed in reverse so lowest ask is at bottom near spread */}
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="flex flex-col-reverse">
           {processedOrders.sells.length === 0 ? (
@@ -315,20 +378,25 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
           ) : (
             processedOrders.sells.map((orderData, idx) => {
               const isExecuting = orderData.orders.some(o => 
-                executingOrder === `${o.nonce}-${o.expires}`
+                executingOrder === (o.hash || `${o.nonce}-${o.expires}`)
               );
+              const hasOwnOrder = orderData.orders.some(o => 
+                o.user?.toLowerCase() === address?.toLowerCase()
+              );
+              const executableOrder = findExecutableOrder(orderData.orders);
               
               return (
                 <div
                   key={`sell-${idx}-${orderData.price}`}
                   onClick={() => !isExecuting && handleOrderClick(orderData, true)}
-                  className={`orderbook-row orderbook-row-sell cursor-pointer ${isExecuting ? 'opacity-50' : ''}`}
+                  className={`orderbook-row orderbook-row-sell cursor-pointer ${isExecuting ? 'opacity-50' : ''} ${hasOwnOrder ? 'border-l-2 border-afrodex-orange' : ''}`}
                   style={{ '--depth': `${orderData.depth}%` } as React.CSSProperties}
-                  title={`Click to buy ${formatOrderBookAmount(orderData.amount)} at ${formatOrderBookPrice(orderData.price)} (${orderData.orders.length} order${orderData.orders.length > 1 ? 's' : ''})`}
+                  title={`Click to buy ${formatOrderBookAmount(orderData.amount)} at ${formatOrderBookPrice(orderData.price)} (${orderData.orders.length} order${orderData.orders.length > 1 ? 's' : ''}${hasOwnOrder ? ' - includes your order' : ''})`}
                 >
                   <span className="text-trade-sell font-mono text-[11px] flex items-center gap-1">
                     {isExecuting && <Loader2 className="w-3 h-3 animate-spin" />}
                     {formatOrderBookPrice(orderData.price)}
+                    {hasOwnOrder && <span className="text-afrodex-orange text-[9px]">•</span>}
                   </span>
                   <span className="text-right font-mono text-gray-300 text-[11px]">
                     {formatOrderBookAmount(orderData.amount)}
@@ -343,7 +411,7 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         </div>
       </div>
 
-      {/* Spread / Mid Price */}
+      {/* Spread / Last Trade Price */}
       <div className="py-2 border-y border-white/5 bg-afrodex-black-lighter/50">
         <div className="flex items-center justify-center">
           {lastTrade ? (
@@ -364,27 +432,31 @@ export default function OrderBook({ baseToken, quoteToken }: OrderBookProps) {
         )}
       </div>
 
-      {/* Buy Orders */}
+      {/* Buy Orders (bids) */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {processedOrders.buys.length === 0 ? (
           <div className="py-4 text-center text-gray-600 text-xs">No buy orders</div>
         ) : (
           processedOrders.buys.map((orderData, idx) => {
             const isExecuting = orderData.orders.some(o => 
-              executingOrder === `${o.nonce}-${o.expires}`
+              executingOrder === (o.hash || `${o.nonce}-${o.expires}`)
+            );
+            const hasOwnOrder = orderData.orders.some(o => 
+              o.user?.toLowerCase() === address?.toLowerCase()
             );
             
             return (
               <div
                 key={`buy-${idx}-${orderData.price}`}
                 onClick={() => !isExecuting && handleOrderClick(orderData, false)}
-                className={`orderbook-row orderbook-row-buy cursor-pointer ${isExecuting ? 'opacity-50' : ''}`}
+                className={`orderbook-row orderbook-row-buy cursor-pointer ${isExecuting ? 'opacity-50' : ''} ${hasOwnOrder ? 'border-l-2 border-afrodex-orange' : ''}`}
                 style={{ '--depth': `${orderData.depth}%` } as React.CSSProperties}
-                title={`Click to sell ${formatOrderBookAmount(orderData.amount)} at ${formatOrderBookPrice(orderData.price)} (${orderData.orders.length} order${orderData.orders.length > 1 ? 's' : ''})`}
+                title={`Click to sell ${formatOrderBookAmount(orderData.amount)} at ${formatOrderBookPrice(orderData.price)} (${orderData.orders.length} order${orderData.orders.length > 1 ? 's' : ''}${hasOwnOrder ? ' - includes your order' : ''})`}
               >
                 <span className="text-trade-buy font-mono text-[11px] flex items-center gap-1">
                   {isExecuting && <Loader2 className="w-3 h-3 animate-spin" />}
                   {formatOrderBookPrice(orderData.price)}
+                  {hasOwnOrder && <span className="text-afrodex-orange text-[9px]">•</span>}
                 </span>
                 <span className="text-right font-mono text-gray-300 text-[11px]">
                   {formatOrderBookAmount(orderData.amount)}
