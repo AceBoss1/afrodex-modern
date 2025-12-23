@@ -3,7 +3,10 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentWeekRange, getBadgeTier, PROGRAM_START_DATE } from './staking';
 
+// ============================================
 // Types
+// ============================================
+
 export interface DbOrder {
   order_hash: string;
   tx_hash?: string;
@@ -50,7 +53,32 @@ export interface DbTrade {
   quote_amount: number;
 }
 
-// Singleton client
+export interface WeeklyLeaderboardEntry {
+  wallet_address: string;
+  volume_eth: number;
+  trade_count: number;
+  gas_fees_eth: number;
+  platform_fees_eth: number;
+  weighted_fees: number;
+  multiplier: number;
+  badge_tier: string;
+  badge_emoji: string;
+}
+
+export interface AllTimeLeaderboardEntry {
+  wallet_address: string;
+  total_volume_eth: number;
+  total_trade_count: number;
+  total_fees_eth: number;
+  badge_tier: string;
+  badge_emoji: string;
+  staked_amount: number;
+}
+
+// ============================================
+// Singleton Client
+// ============================================
+
 let supabaseClient: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
@@ -76,7 +104,6 @@ export async function saveOrder(order: DbOrder): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  // Normalize addresses to lowercase
   const normalizedOrder = {
     ...order,
     order_hash: order.order_hash?.toLowerCase(),
@@ -122,7 +149,6 @@ export async function saveSignedOrder(
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  // Normalize all addresses to lowercase for consistent matching
   const orderHashLower = orderData.hash.toLowerCase();
   const userAddressLower = orderData.user.toLowerCase();
   const tokenGetLower = orderData.tokenGet.toLowerCase();
@@ -177,7 +203,6 @@ export async function getOrdersFromDb(
   const supabase = getSupabaseClient();
   if (!supabase) return { buyOrders: [], sellOrders: [] };
 
-  // Normalize to lowercase for query
   const baseTokenLower = baseToken.toLowerCase();
   const quoteTokenLower = quoteToken.toLowerCase();
 
@@ -202,7 +227,6 @@ export async function getOrdersFromDb(
   const buyOrders = orders.filter(o => o.side === 'buy');
   const sellOrders = orders.filter(o => o.side === 'sell');
 
-  // Log signature info for debugging
   orders.forEach(order => {
     console.log('=== LOADING ORDER FROM DB ===');
     console.log('DB v:', order.v, 'type:', typeof order.v);
@@ -234,6 +258,28 @@ export async function deactivateOrderByHash(orderHash: string): Promise<boolean>
   }
   
   console.log('Deactivate result - rows affected:', data?.length || 0);
+  return (data?.length || 0) > 0;
+}
+
+export async function cancelOrderByHash(orderHash: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  const hashLower = orderHash.toLowerCase();
+  console.log('Cancelling order in DB:', hashLower);
+
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ is_active: false, is_cancelled: true })
+    .eq('order_hash', hashLower)
+    .select();
+
+  if (error) {
+    console.error('Error cancelling order:', error);
+    return false;
+  }
+  
+  console.log('Cancel result - rows affected:', data?.length || 0);
   return (data?.length || 0) > 0;
 }
 
@@ -278,7 +324,6 @@ export async function saveTrade(trade: DbTrade): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  // Normalize addresses
   const normalizedTrade = {
     ...trade,
     tx_hash: trade.tx_hash?.toLowerCase(),
@@ -328,9 +373,6 @@ export async function getTradesFromDb(
   return data || [];
 }
 
-/**
- * Save trade after on-chain execution and record TGIF stats
- */
 export async function saveTradeAfterExecution(
   tradeData: {
     txHash: string;
@@ -360,7 +402,6 @@ export async function saveTradeAfterExecution(
   console.log('quoteAmount (ETH):', tradeData.quoteAmount);
   console.log('gasFeeEth:', gasFeeEth);
 
-  // Normalize addresses
   const normalizedTrade: DbTrade = {
     tx_hash: tradeData.txHash.toLowerCase(),
     log_index: 0,
@@ -380,7 +421,6 @@ export async function saveTradeAfterExecution(
     quote_amount: tradeData.quoteAmount,
   };
 
-  // Save trade
   const { error } = await supabase
     .from('trades')
     .upsert(normalizedTrade, { onConflict: 'tx_hash,log_index' });
@@ -397,7 +437,7 @@ export async function saveTradeAfterExecution(
     console.log('Recording TGIF stats...');
     const takerLower = tradeData.taker.toLowerCase();
     const volumeEth = tradeData.quoteAmount;
-    const actualGasFee = gasFeeEth ?? 0.0003; // Default gas estimate
+    const actualGasFee = gasFeeEth ?? 0.0003;
     
     console.log('Taker:', takerLower);
     console.log('Gas fee:', actualGasFee);
@@ -407,13 +447,12 @@ export async function saveTradeAfterExecution(
     await recordTradeStats(
       takerLower,
       actualGasFee,
-      volumeEth * 0.003, // 0.3% platform fee
+      volumeEth * 0.003,
       volumeEth
     );
     console.log('TGIF stats recorded successfully');
   } catch (statsErr) {
     console.error('Error recording TGIF stats:', statsErr);
-    // Don't fail the trade save if stats fail
   }
 
   console.log('=== SAVE TRADE COMPLETE ===');
@@ -424,12 +463,8 @@ export async function saveTradeAfterExecution(
 // TGIF Rewards Functions
 // ============================================
 
-/**
- * Get staking info from blockchain
- */
 async function getStakingInfoFromBlockchain(wallet: string): Promise<{ stakedAmount: number }> {
   try {
-    // Dynamic import to avoid SSR issues
     const { getStakeInfo } = await import('./staking');
     const stakeInfo = await getStakeInfo(wallet);
     console.log('Fetched staking balance from blockchain:', stakeInfo.stakedAmount);
@@ -440,9 +475,6 @@ async function getStakingInfoFromBlockchain(wallet: string): Promise<{ stakedAmo
   }
 }
 
-/**
- * Record trade statistics for TGIF rewards
- */
 export async function recordTradeStats(
   wallet: string,
   gasFeeEth: number,
@@ -453,7 +485,6 @@ export async function recordTradeStats(
     const supabase = getSupabaseClient();
     if (!supabase) return false;
 
-    // Get current week info
     const { weekStartStr } = getCurrentWeekRange();
 
     console.log('=== RECORDING TGIF TRADE STATS ===');
@@ -463,10 +494,8 @@ export async function recordTradeStats(
     console.log('Platform fee:', platformFeeEth);
     console.log('Volume:', volumeEth);
 
-    // Get actual staking info from blockchain
     const { stakedAmount: actualStakedAmount } = await getStakingInfoFromBlockchain(wallet);
     
-    // Get badge tier based on staked amount
     const badge = getBadgeTier(actualStakedAmount);
     const multiplier = badge.multiplier;
     const badgeTier = badge.name;
@@ -479,17 +508,10 @@ export async function recordTradeStats(
     const weightedFees = totalFees * multiplier;
     console.log('Total fees:', totalFees, 'Weighted fees:', weightedFees);
 
-    // Direct upsert to weekly_trading_stats (simplified - no RPC needed)
-    await recordTradeStatsDirect(
-      wallet, 
-      gasFeeEth, 
-      platformFeeEth, 
-      volumeEth,
-      multiplier,
-      weekStartStr
-    );
+    // Update weekly_trading_stats
+    await recordTradeStatsDirect(wallet, gasFeeEth, platformFeeEth, volumeEth, multiplier, badgeTier, badgeEmoji, weekStartStr);
     
-    // Update user profile separately
+    // Update user profile
     await updateUserProfile(wallet, actualStakedAmount, badgeTier, badgeEmoji, volumeEth, totalFees);
 
     console.log('=== TGIF STATS RECORDED ===');
@@ -500,15 +522,14 @@ export async function recordTradeStats(
   }
 }
 
-/**
- * Direct upsert for trade stats - MINIMAL COLUMNS ONLY
- */
 async function recordTradeStatsDirect(
   wallet: string,
   gasFeeEth: number,
   platformFeeEth: number,
   volumeEth: number,
   multiplier: number,
+  badgeTier: string,
+  badgeEmoji: string,
   weekStartStr: string
 ): Promise<void> {
   const supabase = getSupabaseClient();
@@ -517,23 +538,20 @@ async function recordTradeStatsDirect(
   const totalFees = gasFeeEth + platformFeeEth;
   const weightedFees = totalFees * multiplier;
 
-  // Calculate week_end (6 days after week_start)
   const weekStart = new Date(weekStartStr);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 6);
   const weekEndStr = weekEnd.toISOString().split('T')[0];
 
   try {
-    // Check if record exists for this week
     const { data: existing } = await supabase
       .from('weekly_trading_stats')
-      .select('gas_fees_eth, platform_fees_eth, volume_eth, trade_count, weighted_fees')
+      .select('*')
       .eq('wallet_address', wallet)
       .eq('week_start', weekStartStr)
       .maybeSingle();
 
     if (existing) {
-      // Update existing record - ONLY use columns that exist
       const { error } = await supabase
         .from('weekly_trading_stats')
         .update({
@@ -543,6 +561,8 @@ async function recordTradeStatsDirect(
           trade_count: (existing.trade_count || 0) + 1,
           weighted_fees: (existing.weighted_fees || 0) + weightedFees,
           multiplier: multiplier,
+          badge_tier: badgeTier,
+          badge_emoji: badgeEmoji,
         })
         .eq('wallet_address', wallet)
         .eq('week_start', weekStartStr);
@@ -553,7 +573,6 @@ async function recordTradeStatsDirect(
         console.log('Updated existing weekly_trading_stats record');
       }
     } else {
-      // Insert new record - ONLY use columns that exist
       const { error } = await supabase
         .from('weekly_trading_stats')
         .insert({
@@ -566,6 +585,8 @@ async function recordTradeStatsDirect(
           trade_count: 1,
           weighted_fees: weightedFees,
           multiplier: multiplier,
+          badge_tier: badgeTier,
+          badge_emoji: badgeEmoji,
         });
 
       if (error) {
@@ -579,9 +600,6 @@ async function recordTradeStatsDirect(
   }
 }
 
-/**
- * Update user profile - separate function with error handling
- */
 async function updateUserProfile(
   wallet: string,
   stakedAmount: number,
@@ -594,34 +612,29 @@ async function updateUserProfile(
   if (!supabase) return;
 
   try {
-    // Check if profile exists
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('total_volume_eth, total_fees_paid_eth, trade_count')
+      .select('*')
       .eq('wallet_address', wallet)
       .maybeSingle();
 
     if (profile) {
-      // Update existing profile - ONLY use columns that exist, NO updated_at
+      // Update only columns that exist
       const { error } = await supabase
         .from('user_profiles')
         .update({
           staked_amount: stakedAmount,
           badge_tier: badgeTier,
           badge_emoji: badgeEmoji,
-          total_volume_eth: (profile.total_volume_eth || 0) + volumeEth,
-          total_fees_paid_eth: (profile.total_fees_paid_eth || 0) + totalFees,
-          trade_count: (profile.trade_count || 0) + 1,
         })
         .eq('wallet_address', wallet);
         
       if (error) {
         console.error('Error updating user_profiles:', error.message);
       } else {
-        console.log('Updated user profile:', wallet, badgeTier, stakedAmount);
+        console.log('Updated user profile:', wallet, badgeTier);
       }
     } else {
-      // Create new profile
       const { error } = await supabase
         .from('user_profiles')
         .insert({
@@ -629,15 +642,12 @@ async function updateUserProfile(
           staked_amount: stakedAmount,
           badge_tier: badgeTier,
           badge_emoji: badgeEmoji,
-          total_volume_eth: volumeEth,
-          total_fees_paid_eth: totalFees,
-          trade_count: 1,
         });
         
       if (error) {
         console.error('Error creating user_profiles:', error.message);
       } else {
-        console.log('Created new user profile:', wallet, badgeTier, stakedAmount);
+        console.log('Created new user profile:', wallet, badgeTier);
       }
     }
   } catch (err) {
@@ -649,21 +659,6 @@ async function updateUserProfile(
 // Leaderboard Functions
 // ============================================
 
-export interface WeeklyLeaderboardEntry {
-  wallet_address: string;
-  volume_eth: number;
-  trade_count: number;
-  gas_fees_eth: number;
-  platform_fees_eth: number;
-  weighted_fees: number;
-  multiplier: number;
-  badge_tier: string;
-  badge_emoji: string;
-}
-
-/**
- * Get weekly leaderboard data
- */
 export async function getWeeklyLeaderboard(weekStart: string): Promise<WeeklyLeaderboardEntry[]> {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
@@ -682,37 +677,80 @@ export async function getWeeklyLeaderboard(weekStart: string): Promise<WeeklyLea
   }
 
   console.log('Weekly leaderboard entries:', data?.length || 0);
+  console.log('Weekly entries from DB:', data?.length || 0);
 
-  // Enrich with badge info from user_profiles
-  const entries: WeeklyLeaderboardEntry[] = [];
-  
-  for (const row of (data || [])) {
-    // Get badge info from user_profiles
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('badge_tier, badge_emoji')
-      .eq('wallet_address', row.wallet_address)
-      .maybeSingle();
+  // Calculate total weighted fees for logging
+  const totalWeightedFees = (data || []).reduce((sum, row) => sum + (row.weighted_fees || 0), 0);
+  console.log('Total weighted fees:', totalWeightedFees);
 
-    entries.push({
-      wallet_address: row.wallet_address,
-      volume_eth: row.volume_eth || 0,
-      trade_count: row.trade_count || 0,
-      gas_fees_eth: row.gas_fees_eth || 0,
-      platform_fees_eth: row.platform_fees_eth || 0,
-      weighted_fees: row.weighted_fees || 0,
-      multiplier: row.multiplier || 0,
-      badge_tier: profile?.badge_tier || 'Starter',
-      badge_emoji: profile?.badge_emoji || '🌱',
-    });
-  }
+  const entries: WeeklyLeaderboardEntry[] = (data || []).map(row => ({
+    wallet_address: row.wallet_address,
+    volume_eth: row.volume_eth || 0,
+    trade_count: row.trade_count || 0,
+    gas_fees_eth: row.gas_fees_eth || 0,
+    platform_fees_eth: row.platform_fees_eth || 0,
+    weighted_fees: row.weighted_fees || 0,
+    multiplier: row.multiplier || 0,
+    badge_tier: row.badge_tier || 'Starter',
+    badge_emoji: row.badge_emoji || '🌱',
+  }));
 
   return entries;
 }
 
-/**
- * Get user's weekly stats
- */
+export async function getAllTimeLeaderboard(): Promise<AllTimeLeaderboardEntry[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return [];
+
+  console.log('Fetching all-time leaderboard...');
+
+  // Aggregate all weekly stats by wallet
+  const { data, error } = await supabase
+    .from('weekly_trading_stats')
+    .select('wallet_address, volume_eth, trade_count, gas_fees_eth, platform_fees_eth, badge_tier, badge_emoji, multiplier');
+
+  if (error) {
+    console.error('Error fetching all-time leaderboard:', error);
+    return [];
+  }
+
+  // Aggregate by wallet address
+  const walletMap = new Map<string, AllTimeLeaderboardEntry>();
+
+  for (const row of (data || [])) {
+    const wallet = row.wallet_address.toLowerCase();
+    const existing = walletMap.get(wallet);
+    
+    if (existing) {
+      existing.total_volume_eth += row.volume_eth || 0;
+      existing.total_trade_count += row.trade_count || 0;
+      existing.total_fees_eth += (row.gas_fees_eth || 0) + (row.platform_fees_eth || 0);
+      // Keep the latest badge info
+      if (row.badge_tier) {
+        existing.badge_tier = row.badge_tier;
+        existing.badge_emoji = row.badge_emoji || '🌱';
+      }
+    } else {
+      walletMap.set(wallet, {
+        wallet_address: wallet,
+        total_volume_eth: row.volume_eth || 0,
+        total_trade_count: row.trade_count || 0,
+        total_fees_eth: (row.gas_fees_eth || 0) + (row.platform_fees_eth || 0),
+        badge_tier: row.badge_tier || 'Starter',
+        badge_emoji: row.badge_emoji || '🌱',
+        staked_amount: 0,
+      });
+    }
+  }
+
+  // Sort by total volume
+  const entries = Array.from(walletMap.values())
+    .sort((a, b) => b.total_volume_eth - a.total_volume_eth);
+
+  console.log('All-time leaderboard entries:', entries.length);
+  return entries;
+}
+
 export async function getUserWeeklyStats(
   wallet: string,
   weekStart: string
@@ -733,13 +771,6 @@ export async function getUserWeeklyStats(
     return null;
   }
 
-  // Get badge info
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('badge_tier, badge_emoji')
-    .eq('wallet_address', walletLower)
-    .maybeSingle();
-
   return {
     wallet_address: data.wallet_address,
     volume_eth: data.volume_eth || 0,
@@ -748,22 +779,16 @@ export async function getUserWeeklyStats(
     platform_fees_eth: data.platform_fees_eth || 0,
     weighted_fees: data.weighted_fees || 0,
     multiplier: data.multiplier || 0,
-    badge_tier: profile?.badge_tier || 'Starter',
-    badge_emoji: profile?.badge_emoji || '🌱',
+    badge_tier: data.badge_tier || 'Starter',
+    badge_emoji: data.badge_emoji || '🌱',
   };
 }
 
-/**
- * Get user profile
- */
 export async function getUserProfile(wallet: string): Promise<{
   wallet_address: string;
   badge_tier: string;
   badge_emoji: string;
   staked_amount: number;
-  total_volume_eth: number;
-  total_fees_paid_eth: number;
-  trade_count: number;
 } | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -772,7 +797,7 @@ export async function getUserProfile(wallet: string): Promise<{
 
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('*')
+    .select('wallet_address, badge_tier, badge_emoji, staked_amount')
     .eq('wallet_address', walletLower)
     .maybeSingle();
 
@@ -785,16 +810,13 @@ export async function getUserProfile(wallet: string): Promise<{
     badge_tier: data.badge_tier || 'Starter',
     badge_emoji: data.badge_emoji || '🌱',
     staked_amount: data.staked_amount || 0,
-    total_volume_eth: data.total_volume_eth || 0,
-    total_fees_paid_eth: data.total_fees_paid_eth || 0,
-    trade_count: data.trade_count || 0,
   };
 }
 
-/**
- * Save a partial fill remainder order
- * When taker's order is larger than maker's order, save the remainder
- */
+// ============================================
+// Partial Fill Support
+// ============================================
+
 export async function savePartialFillOrder(
   originalOrder: {
     tokenGet: string;
@@ -820,12 +842,8 @@ export async function savePartialFillOrder(
   side: 'buy' | 'sell',
   price: number
 ): Promise<boolean> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return false;
-
-  // Calculate amounts based on side
-  const baseDecimals = 4; // AfroX uses 4 decimals
-  const quoteDecimals = 18; // ETH uses 18 decimals
+  const baseDecimals = 4;
+  const quoteDecimals = 18;
   
   let baseAmount: number;
   let quoteAmount: number;
@@ -842,7 +860,6 @@ export async function savePartialFillOrder(
   console.log('Original hash:', originalOrder.hash);
   console.log('New hash:', newHash);
   console.log('Remainder base amount:', baseAmount);
-  console.log('Remainder quote amount:', quoteAmount);
 
   return saveSignedOrder(
     {
@@ -877,6 +894,7 @@ const supabaseExports = {
   saveSignedOrder,
   getOrdersFromDb,
   deactivateOrderByHash,
+  cancelOrderByHash,
   updateOrderFilled,
   clearAllOrders,
   saveTrade,
@@ -884,6 +902,7 @@ const supabaseExports = {
   saveTradeAfterExecution,
   recordTradeStats,
   getWeeklyLeaderboard,
+  getAllTimeLeaderboard,
   getUserWeeklyStats,
   getUserProfile,
   savePartialFillOrder,
