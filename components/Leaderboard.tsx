@@ -348,15 +348,17 @@ export default function Leaderboard() {
                   {/* Header */}
                   <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs text-gray-500 border-b border-gray-700">
                     <div className="col-span-1">#</div>
-                    <div className="col-span-4">Trader</div>
-                    <div className="col-span-3 text-right">Volume</div>
+                    <div className="col-span-3">Trader</div>
+                    <div className="col-span-2 text-right">Volume</div>
+                    <div className="col-span-2 text-right">Fees Paid</div>
                     <div className="col-span-2 text-center">Trades</div>
-                    <div className="col-span-2 text-right">Total Rewards</div>
+                    <div className="col-span-2 text-right">Est. Reward</div>
                   </div>
 
                   {/* Entries */}
                   {weeklyData.map((entry) => {
                     const isCurrentUser = address?.toLowerCase() === entry.wallet_address.toLowerCase();
+                    const totalFees = (entry.gas_fees_eth || 0) + (entry.platform_fees_eth || 0);
                     
                     return (
                       <div
@@ -370,19 +372,22 @@ export default function Leaderboard() {
                         <div className="col-span-1 flex items-center">
                           {getRankIcon(entry.rank)}
                         </div>
-                        <div className="col-span-4 flex items-center gap-2">
+                        <div className="col-span-3 flex items-center gap-2">
                           <span className="text-lg">{entry.badge_emoji || '🔘'}</span>
-                          <span className={`font-mono text-sm ${isCurrentUser ? 'text-afrodex-orange' : 'text-gray-300'}`}>
+                          <span className={`font-mono text-xs ${isCurrentUser ? 'text-afrodex-orange' : 'text-gray-300'}`}>
                             {formatAddress(entry.wallet_address)}
                           </span>
                         </div>
-                        <div className="col-span-3 text-right font-mono text-sm">
+                        <div className="col-span-2 text-right font-mono text-xs">
                           {entry.volume_eth.toFixed(4)} ETH
                         </div>
-                        <div className="col-span-2 text-center text-sm text-gray-400">
+                        <div className="col-span-2 text-right font-mono text-xs text-yellow-400">
+                          {totalFees.toFixed(6)} ETH
+                        </div>
+                        <div className="col-span-2 text-center text-xs text-gray-400">
                           {entry.trade_count}
                         </div>
-                        <div className="col-span-2 text-right font-mono text-sm text-trade-buy">
+                        <div className="col-span-2 text-right font-mono text-xs text-trade-buy">
                           {formatRewardAmount(entry.estimated_reward)}
                         </div>
                       </div>
