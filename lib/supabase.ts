@@ -68,8 +68,9 @@ export interface WeeklyLeaderboardEntry {
 export interface AllTimeLeaderboardEntry {
   wallet_address: string;
   total_volume_eth: number;
-  total_trade_count: number;
-  total_fees_eth: number;
+  trade_count: number;
+  total_fees_paid_eth: number;
+  total_rewards_earned: number;
   badge_tier: string;
   badge_emoji: string;
   staked_amount: number;
@@ -725,8 +726,8 @@ export async function getAllTimeLeaderboard(): Promise<AllTimeLeaderboardEntry[]
     
     if (existing) {
       existing.total_volume_eth += row.volume_eth || 0;
-      existing.total_trade_count += row.trade_count || 0;
-      existing.total_fees_eth += (row.gas_fees_eth || 0) + (row.platform_fees_eth || 0);
+      existing.trade_count += row.trade_count || 0;
+      existing.total_fees_paid_eth += (row.gas_fees_eth || 0) + (row.platform_fees_eth || 0);
       // Keep the latest badge info
       if (row.badge_tier) {
         existing.badge_tier = row.badge_tier;
@@ -736,8 +737,9 @@ export async function getAllTimeLeaderboard(): Promise<AllTimeLeaderboardEntry[]
       walletMap.set(wallet, {
         wallet_address: wallet,
         total_volume_eth: row.volume_eth || 0,
-        total_trade_count: row.trade_count || 0,
-        total_fees_eth: (row.gas_fees_eth || 0) + (row.platform_fees_eth || 0),
+        trade_count: row.trade_count || 0,
+        total_fees_paid_eth: (row.gas_fees_eth || 0) + (row.platform_fees_eth || 0),
+        total_rewards_earned: 0,
         badge_tier: row.badge_tier || 'Starter',
         badge_emoji: row.badge_emoji || '🌱',
         staked_amount: 0,
