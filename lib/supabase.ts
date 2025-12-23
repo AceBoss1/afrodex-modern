@@ -146,43 +146,112 @@ export async function saveSignedOrder(
   price: number,
   baseAmount: number,
   quoteAmount: number
+): Promise<boolean>;
+
+// Overload for TradingPanel which passes a single object with snake_case fields
+export async function saveSignedOrder(
+  orderObj: {
+    token_get: string;
+    amount_get: string;
+    token_give: string;
+    amount_give: string;
+    expires: string;
+    nonce: string;
+    user_address: string;
+    base_token: string;
+    quote_token: string;
+    side: 'buy' | 'sell';
+    price: number;
+    base_amount: number;
+    quote_amount: number;
+    v: number;
+    r: string;
+    s: string;
+    order_hash: string;
+  }
+): Promise<boolean>;
+
+// Implementation
+export async function saveSignedOrder(
+  orderDataOrObj: any,
+  baseToken?: string,
+  quoteToken?: string,
+  side?: 'buy' | 'sell',
+  price?: number,
+  baseAmount?: number,
+  quoteAmount?: number
 ): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
-  const orderHashLower = orderData.hash.toLowerCase();
-  const userAddressLower = orderData.user.toLowerCase();
-  const tokenGetLower = orderData.tokenGet.toLowerCase();
-  const tokenGiveLower = orderData.tokenGive.toLowerCase();
-  const baseTokenLower = baseToken.toLowerCase();
-  const quoteTokenLower = quoteToken.toLowerCase();
+  let dbOrder: DbOrder;
 
-  console.log(`saveSignedOrder: ${side} order at price ${price} hash: ${orderHashLower.slice(0, 10)}...`);
+  // Check if called with single object (TradingPanel style) or 7 arguments
+  if (baseToken === undefined) {
+    // Single object argument with snake_case fields
+    const obj = orderDataOrObj;
+    dbOrder = {
+      order_hash: obj.order_hash?.toLowerCase(),
+      tx_hash: obj.order_hash?.toLowerCase(),
+      log_index: 0,
+      user_address: obj.user_address?.toLowerCase(),
+      token_get: obj.token_get?.toLowerCase(),
+      amount_get: obj.amount_get,
+      token_give: obj.token_give?.toLowerCase(),
+      amount_give: obj.amount_give,
+      expires: obj.expires,
+      nonce: obj.nonce,
+      v: obj.v,
+      r: obj.r,
+      s: obj.s,
+      base_token: obj.base_token?.toLowerCase(),
+      quote_token: obj.quote_token?.toLowerCase(),
+      side: obj.side,
+      price: obj.price,
+      base_amount: obj.base_amount,
+      quote_amount: obj.quote_amount,
+      is_active: true,
+      is_cancelled: false,
+      amount_filled: '0',
+    };
+    console.log(`saveSignedOrder (single obj): ${obj.side} order at price ${obj.price} hash: ${dbOrder.order_hash?.slice(0, 10)}...`);
+  } else {
+    // 7 arguments with camelCase orderData
+    const orderData = orderDataOrObj;
+    const orderHashLower = orderData.hash.toLowerCase();
+    const userAddressLower = orderData.user.toLowerCase();
+    const tokenGetLower = orderData.tokenGet.toLowerCase();
+    const tokenGiveLower = orderData.tokenGive.toLowerCase();
+    const baseTokenLower = baseToken.toLowerCase();
+    const quoteTokenLower = quoteToken!.toLowerCase();
 
-  const dbOrder: DbOrder = {
-    order_hash: orderHashLower,
-    tx_hash: orderHashLower,
-    log_index: 0,
-    user_address: userAddressLower,
-    token_get: tokenGetLower,
-    amount_get: orderData.amountGet,
-    token_give: tokenGiveLower,
-    amount_give: orderData.amountGive,
-    expires: orderData.expires,
-    nonce: orderData.nonce,
-    v: orderData.v,
-    r: orderData.r,
-    s: orderData.s,
-    base_token: baseTokenLower,
-    quote_token: quoteTokenLower,
-    side,
-    price,
-    base_amount: baseAmount,
-    quote_amount: quoteAmount,
-    is_active: true,
-    is_cancelled: false,
-    amount_filled: '0',
-  };
+    console.log(`saveSignedOrder (7 args): ${side} order at price ${price} hash: ${orderHashLower.slice(0, 10)}...`);
+
+    dbOrder = {
+      order_hash: orderHashLower,
+      tx_hash: orderHashLower,
+      log_index: 0,
+      user_address: userAddressLower,
+      token_get: tokenGetLower,
+      amount_get: orderData.amountGet,
+      token_give: tokenGiveLower,
+      amount_give: orderData.amountGive,
+      expires: orderData.expires,
+      nonce: orderData.nonce,
+      v: orderData.v,
+      r: orderData.r,
+      s: orderData.s,
+      base_token: baseTokenLower,
+      quote_token: quoteTokenLower,
+      side: side!,
+      price: price!,
+      base_amount: baseAmount!,
+      quote_amount: quoteAmount!,
+      is_active: true,
+      is_cancelled: false,
+      amount_filled: '0',
+    };
+  }
 
   const { error } = await supabase
     .from('orders')
