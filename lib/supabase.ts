@@ -285,24 +285,22 @@ export async function saveTradeAfterExecution(
   trade: TradeExecutionInput,
   gasFeeEth?: number
 ): Promise<{ success: boolean; error?: string }> {
+  console.log('=== SAVE TRADE AFTER EXECUTION ===');
+  console.log('txHash:', trade.txHash);
+  console.log('taker:', trade.taker);
+  console.log('quoteAmount (ETH):', trade.quoteAmount);
+  console.log('gasFeeEth:', gasFeeEth);
+  
   const supabase = getSupabaseClient();
   if (!supabase) {
     console.error('saveTradeAfterExecution: Supabase not configured');
     return { success: false, error: 'Supabase not configured' };
   }
 
-  console.log('=== SAVING TRADE TO SUPABASE ===');
-  console.log('txHash:', trade.txHash);
-  console.log('maker:', trade.maker);
-  console.log('taker:', trade.taker);
-  console.log('price:', trade.price);
-  console.log('baseAmount:', trade.baseAmount);
-  console.log('quoteAmount:', trade.quoteAmount);
-  console.log('side:', trade.side);
-  console.log('================================');
-
+  // CRITICAL: Lowercase all addresses
+  const txHashLower = trade.txHash.toLowerCase();
   const dbTrade: DbTrade = {
-    tx_hash: trade.txHash,
+    tx_hash: txHashLower,
     log_index: 0,
     token_get: trade.tokenGet.toLowerCase(),
     amount_get: trade.amountGet,
@@ -320,56 +318,72 @@ export async function saveTradeAfterExecution(
     quote_amount: trade.quoteAmount,
   };
 
-  // Check if trade already exists
-  const { data: existing } = await supabase
-    .from('trades')
-    .select('tx_hash')
-    .eq('tx_hash', trade.txHash)
-    .eq('log_index', 0)
-    .maybeSingle();
+  // Step 1: Save trade to trades table
+  let tradeSaved = false;
+  try {
+    const { data: existing } = await supabase
+      .from('trades')
+      .select('tx_hash')
+      .eq('tx_hash', txHashLower)
+      .eq('log_index', 0)
+      .maybeSingle();
 
-  let error;
-  if (existing) {
-    // Update existing
-    const result = await supabase
-      .from('trades')
-      .update(dbTrade)
-      .eq('tx_hash', trade.txHash)
-      .eq('log_index', 0);
-    error = result.error;
-  } else {
-    // Insert new
-    const result = await supabase
-      .from('trades')
-      .insert(dbTrade);
-    error = result.error;
+    if (existing) {
+      const { error } = await supabase
+        .from('trades')
+        .update(dbTrade)
+        .eq('tx_hash', txHashLower)
+        .eq('log_index', 0);
+      
+      if (error) {
+        console.error('Error updating trade:', error);
+      } else {
+        console.log('Trade updated in Supabase');
+        tradeSaved = true;
+      }
+    } else {
+      const { error } = await supabase
+        .from('trades')
+        .insert(dbTrade);
+      
+      if (error) {
+        console.error('Error inserting trade:', error);
+      } else {
+        console.log('Trade inserted to Supabase');
+        tradeSaved = true;
+      }
+    }
+  } catch (err) {
+    console.error('Trade save error:', err);
   }
 
-  if (error) {
-    console.error('Error saving trade after execution:', error);
-    return { success: false, error: error.message };
-  }
-
-  console.log('Trade saved successfully to Supabase');
-  
-  // Record TGIF stats for the taker (who paid gas and platform fee)
-  // Platform fee is 0.3% of the trade value (quoteAmount in ETH)
+  // Step 2: Record TGIF stats (even if trade save had issues)
+  // Platform fee is 0.3% of the trade value
   const platformFeeEth = trade.quoteAmount * 0.003;
   const volumeEth = trade.quoteAmount;
+  // Use provided gas fee or estimate ~0.0003 ETH for a trade
+  const actualGasFee = gasFeeEth || 0.0003;
   
-  console.log('Recording TGIF stats for taker:', trade.taker);
-  console.log('Gas fee ETH:', gasFeeEth || 0);
-  console.log('Platform fee ETH:', platformFeeEth);
-  console.log('Volume ETH:', volumeEth);
+  console.log('Recording TGIF stats...');
+  console.log('Taker:', trade.taker.toLowerCase());
+  console.log('Gas fee:', actualGasFee);
+  console.log('Platform fee:', platformFeeEth);
+  console.log('Volume:', volumeEth);
   
-  await recordTradeStats(
-    trade.taker,
-    gasFeeEth || 0,
-    platformFeeEth,
-    volumeEth
-  );
+  try {
+    await recordTradeStats(
+      trade.taker,
+      actualGasFee,
+      platformFeeEth,
+      volumeEth
+    );
+    console.log('TGIF stats recorded successfully');
+  } catch (err) {
+    console.error('Error recording TGIF stats:', err);
+  }
   
-  return { success: true };
+  console.log('=== SAVE TRADE COMPLETE ===');
+  return { success: tradeSaved };
 }
 
 // ============================================
