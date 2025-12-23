@@ -526,7 +526,7 @@ async function recordTradeStatsDirect(
     .maybeSingle();
 
   if (existing) {
-    // Update existing record
+    // Update existing record - DO NOT include badge_tier/badge_emoji (columns may not exist)
     const { error } = await supabase
       .from('weekly_trading_stats')
       .update({
@@ -536,8 +536,6 @@ async function recordTradeStatsDirect(
         trade_count: (existing.trade_count || 0) + 1,
         weighted_fees: (existing.weighted_fees || 0) + weightedFees,
         multiplier: multiplier,
-        badge_tier: badgeTier,
-        badge_emoji: badgeEmoji,
         updated_at: new Date().toISOString(),
       })
       .eq('wallet_address', wallet)
@@ -549,20 +547,25 @@ async function recordTradeStatsDirect(
       console.log('Updated existing weekly_trading_stats record');
     }
   } else {
-    // Insert new record
+    // Insert new record - DO NOT include badge_tier/badge_emoji (columns may not exist)
+    // Calculate week_end (6 days after week_start)
+    const weekStart = new Date(weekStartStr);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const weekEndStr = weekEnd.toISOString().split('T')[0];
+    
     const { error } = await supabase
       .from('weekly_trading_stats')
       .insert({
         wallet_address: wallet,
         week_start: weekStartStr,
+        week_end: weekEndStr,
         gas_fees_eth: gasFeeEth,
         platform_fees_eth: platformFeeEth,
         volume_eth: volumeEth,
         trade_count: 1,
         weighted_fees: weightedFees,
         multiplier: multiplier,
-        badge_tier: badgeTier,
-        badge_emoji: badgeEmoji,
       });
 
     if (error) {
