@@ -29,6 +29,7 @@ export interface DbOrder {
 }
 
 export interface DbTrade {
+  id?: number;
   tx_hash: string;
   log_index: number;
   token_get: string;
