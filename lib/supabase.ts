@@ -6,6 +6,8 @@ import { getCurrentWeekRange, getBadgeTier, PROGRAM_START_DATE } from './staking
 // Types
 export interface DbOrder {
   order_hash: string;
+  tx_hash?: string;  // For off-chain orders, use order_hash as placeholder
+  log_index?: number;
   user_address: string;
   token_get: string;
   amount_get: string;
@@ -93,19 +95,22 @@ export async function saveOrder(order: DbOrder): Promise<boolean> {
   if (!supabase) return false;
 
   // Set default values for optional fields
+  // Use order_hash as tx_hash for off-chain orders (no on-chain tx yet)
   const orderWithDefaults = {
     ...order,
+    tx_hash: order.tx_hash || order.order_hash,
+    log_index: order.log_index ?? 0,
     is_active: order.is_active ?? true,
     is_cancelled: order.is_cancelled ?? false,
     amount_filled: order.amount_filled ?? '0',
   };
 
-  // Check if order already exists
+  // Check if order already exists (use maybeSingle to avoid 406 error)
   const { data: existing } = await supabase
     .from('orders')
     .select('order_hash')
     .eq('order_hash', order.order_hash)
-    .single();
+    .maybeSingle();
 
   let error;
   if (existing) {
@@ -218,7 +223,7 @@ export async function saveTrade(trade: DbTrade): Promise<boolean> {
     .select('tx_hash')
     .eq('tx_hash', trade.tx_hash)
     .eq('log_index', trade.log_index)
-    .single();
+    .maybeSingle();
 
   let error;
   if (existing) {
@@ -311,7 +316,7 @@ export async function saveTradeAfterExecution(
     .select('tx_hash')
     .eq('tx_hash', trade.txHash)
     .eq('log_index', 0)
-    .single();
+    .maybeSingle();
 
   let error;
   if (existing) {
@@ -410,7 +415,7 @@ export async function recordTradeStats(
           .from('user_profiles')
           .select('staked_amount, badge_tier, badge_emoji')
           .eq('wallet_address', wallet)
-          .single();
+          .maybeSingle();
         
         if (profile && profile.staked_amount) {
           actualStakedAmount = profile.staked_amount;
@@ -494,7 +499,7 @@ async function recordTradeStatsDirect(
     .select('*')
     .eq('wallet_address', wallet)
     .eq('week_start', weekStartStr)
-    .single();
+    .maybeSingle();
 
   if (existing) {
     // Update existing record
@@ -569,7 +574,7 @@ async function updateUserProfileWithStaking(
     .from('user_profiles')
     .select('*')
     .eq('wallet_address', wallet)
-    .single();
+    .maybeSingle();
 
   if (profile) {
     // Update existing profile with staking info and trade stats
@@ -624,7 +629,7 @@ async function updateUserProfileStats(
     .from('user_profiles')
     .select('*')
     .eq('wallet_address', wallet)
-    .single();
+    .maybeSingle();
 
   if (profile) {
     // Update existing profile
@@ -752,19 +757,22 @@ export async function saveSignedOrder(order: DbOrder): Promise<{ success: boolea
   }
 
   // Set default values for optional fields
+  // Use order_hash as tx_hash for off-chain orders (no on-chain tx yet)
   const orderWithDefaults = {
     ...order,
+    tx_hash: order.tx_hash || order.order_hash,
+    log_index: order.log_index ?? 0,
     is_active: order.is_active ?? true,
     is_cancelled: order.is_cancelled ?? false,
     amount_filled: order.amount_filled ?? '0',
   };
 
-  // First check if order already exists
+  // Check if order already exists (use maybeSingle to avoid 406 error)
   const { data: existing } = await supabase
     .from('orders')
     .select('order_hash')
     .eq('order_hash', order.order_hash)
-    .single();
+    .maybeSingle();
 
   if (existing) {
     // Update existing order
