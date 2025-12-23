@@ -24,7 +24,7 @@ export interface DbOrder {
   quote_amount: number;
   is_active?: boolean;
   is_cancelled?: boolean;
-  amount_filled?: number;
+  amount_filled?: string;
   created_at?: string;
 }
 
@@ -97,7 +97,7 @@ export async function saveOrder(order: DbOrder): Promise<boolean> {
     ...order,
     is_active: order.is_active ?? true,
     is_cancelled: order.is_cancelled ?? false,
-    amount_filled: order.amount_filled ?? 0,
+    amount_filled: order.amount_filled ?? '0',
   };
 
   const { error } = await supabase
@@ -156,7 +156,7 @@ export async function deactivateOrderByHash(orderHash: string): Promise<boolean>
 
 export async function updateOrderFilled(
   orderHash: string, 
-  amountFilled: number,
+  amountFilled: string | number,
   fullyFilled: boolean = false
 ): Promise<boolean> {
   const supabase = getSupabaseClient();
@@ -165,7 +165,7 @@ export async function updateOrderFilled(
   const { error } = await supabase
     .from('orders')
     .update({ 
-      amount_filled: amountFilled,
+      amount_filled: String(amountFilled),
       is_active: !fullyFilled
     })
     .eq('order_hash', orderHash);
@@ -695,7 +695,7 @@ export async function saveSignedOrder(order: DbOrder): Promise<{ success: boolea
     ...order,
     is_active: order.is_active ?? true,
     is_cancelled: order.is_cancelled ?? false,
-    amount_filled: order.amount_filled ?? 0,
+    amount_filled: order.amount_filled ?? '0',
   };
 
   const { error } = await supabase
