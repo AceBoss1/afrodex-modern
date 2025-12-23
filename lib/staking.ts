@@ -37,12 +37,6 @@ export const BADGE_TIERS: BadgeTier[] = [
 ];
 
 // Emission Schedule - 1 Trillion AfroX over ~3 years (156 weeks)
-// Quarter 1 (Weeks 1-13): 25B/week = 325B total
-// Quarter 2 (Weeks 14-26): 22B/week = 286B total
-// Quarter 3 (Weeks 27-39): 18B/week = 234B total
-// Quarter 4 (Weeks 40-52): 15B/week = 195B total = ~1.04T Year 1
-// Year 2 (Weeks 53-104): 5B/week = 260B total
-// Year 3 (Weeks 105-156): 2B/week = 104B total
 export const EMISSION_SCHEDULE = [
   { weekStart: 1, weekEnd: 13, weeklyReward: 25_000_000_000 },   // Q1: 25B/week
   { weekStart: 14, weekEnd: 26, weeklyReward: 22_000_000_000 },  // Q2: 22B/week
@@ -56,6 +50,28 @@ export const EMISSION_SCHEDULE = [
 export const PLATFORM_FEE_PERCENT = 0.003;
 
 /**
+ * Get a reliable RPC provider - NEVER defaults to localhost
+ */
+function getReliableProvider(): ethers.JsonRpcProvider {
+  // Try Alchemy first
+  const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+  if (alchemyKey) {
+    return new ethers.JsonRpcProvider(`https://eth-mainnet.g.alchemy.com/v2/${alchemyKey}`);
+  }
+  
+  // Fallback to public RPCs - NEVER localhost
+  const publicRpcs = [
+    'https://eth.llamarpc.com',
+    'https://rpc.ankr.com/eth',
+    'https://ethereum.publicnode.com',
+    'https://1rpc.io/eth',
+  ];
+  
+  // Use first public RPC
+  return new ethers.JsonRpcProvider(publicRpcs[0]);
+}
+
+/**
  * Get staking info for an address
  */
 export async function getStakeInfo(
@@ -63,9 +79,8 @@ export async function getStakeInfo(
   provider?: ethers.Provider
 ): Promise<{ stakedAmount: number; isStaking: boolean }> {
   try {
-    const rpcProvider = provider || new ethers.JsonRpcProvider(
-      process.env.NEXT_PUBLIC_ALCHEMY_RPC_URL
-    );
+    // Use provided provider or get a reliable one - NEVER localhost
+    const rpcProvider = provider || getReliableProvider();
     
     const contract = new ethers.Contract(AFROX_CONTRACT, STAKING_ABI, rpcProvider);
     const [stakedAmount, , , isExist] = await contract.viewStakeInfoOf(address);
