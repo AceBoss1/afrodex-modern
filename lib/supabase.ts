@@ -91,51 +91,45 @@ export function getSupabaseClient(): SupabaseClient | null {
 // ============================================
 
 export async function saveOrder(order: DbOrder): Promise<boolean> {
-  console.log('=== SAVE ORDER CALLED ===');
-  console.log('order_hash:', order.order_hash);
-  console.log('base_token:', order.base_token);
-  console.log('side:', order.side);
-  
   const supabase = getSupabaseClient();
   if (!supabase) {
-    console.error('Supabase not configured!');
+    console.error('saveOrder: Supabase not configured!');
     return false;
   }
 
-  // Set default values for optional fields
-  // Use order_hash as tx_hash for off-chain orders (no on-chain tx yet)
+  // CRITICAL: Lowercase all addresses for consistent querying
   const orderWithDefaults = {
     ...order,
-    tx_hash: order.tx_hash || order.order_hash,
+    order_hash: order.order_hash.toLowerCase(),
+    user_address: order.user_address.toLowerCase(),
+    token_get: order.token_get.toLowerCase(),
+    token_give: order.token_give.toLowerCase(),
+    base_token: order.base_token.toLowerCase(),
+    quote_token: order.quote_token.toLowerCase(),
+    tx_hash: (order.tx_hash || order.order_hash).toLowerCase(),
     log_index: order.log_index ?? 0,
     is_active: order.is_active ?? true,
     is_cancelled: order.is_cancelled ?? false,
     amount_filled: order.amount_filled ?? '0',
   };
 
-  console.log('Saving with tx_hash:', orderWithDefaults.tx_hash);
+  console.log('saveOrder:', order.side, 'at price', order.price);
 
-  // Check if order already exists (use maybeSingle to avoid 406 error)
-  const { data: existing, error: checkError } = await supabase
+  // Check if order already exists
+  const { data: existing } = await supabase
     .from('orders')
     .select('order_hash')
-    .eq('order_hash', order.order_hash)
+    .eq('order_hash', orderWithDefaults.order_hash)
     .maybeSingle();
-
-  if (checkError) {
-    console.error('Error checking existing order:', checkError);
-  }
 
   let error;
   if (existing) {
-    console.log('Updating existing order...');
     const result = await supabase
       .from('orders')
       .update(orderWithDefaults)
-      .eq('order_hash', order.order_hash);
+      .eq('order_hash', orderWithDefaults.order_hash);
     error = result.error;
   } else {
-    console.log('Inserting new order...');
     const result = await supabase
       .from('orders')
       .insert(orderWithDefaults);
@@ -147,7 +141,7 @@ export async function saveOrder(order: DbOrder): Promise<boolean> {
     return false;
   }
   
-  console.log('=== ORDER SAVED SUCCESSFULLY ===');
+  console.log('Order saved successfully');
   return true;
 }
 
@@ -767,59 +761,49 @@ export async function deactivateOrderByNonceAndUser(
  * Save a signed order to the database
  */
 export async function saveSignedOrder(order: DbOrder): Promise<{ success: boolean; error?: string }> {
-  console.log('=== SAVE SIGNED ORDER CALLED ===');
-  console.log('order_hash:', order.order_hash);
-  console.log('base_token:', order.base_token);
-  console.log('side:', order.side);
-  console.log('price:', order.price);
-  
   const supabase = getSupabaseClient();
   if (!supabase) {
-    console.error('Supabase not configured!');
+    console.error('saveSignedOrder: Supabase not configured!');
     return { success: false, error: 'Supabase not configured' };
   }
 
-  // Set default values for optional fields
-  // Use order_hash as tx_hash for off-chain orders (no on-chain tx yet)
+  // CRITICAL: Lowercase all addresses for consistent querying
   const orderWithDefaults = {
     ...order,
-    tx_hash: order.tx_hash || order.order_hash,
+    order_hash: order.order_hash.toLowerCase(),
+    user_address: order.user_address.toLowerCase(),
+    token_get: order.token_get.toLowerCase(),
+    token_give: order.token_give.toLowerCase(),
+    base_token: order.base_token.toLowerCase(),
+    quote_token: order.quote_token.toLowerCase(),
+    tx_hash: (order.tx_hash || order.order_hash).toLowerCase(),
     log_index: order.log_index ?? 0,
     is_active: order.is_active ?? true,
     is_cancelled: order.is_cancelled ?? false,
     amount_filled: order.amount_filled ?? '0',
   };
 
-  console.log('Order with defaults:', JSON.stringify(orderWithDefaults, null, 2));
+  console.log('saveSignedOrder:', order.side, 'order at price', order.price, 'hash:', orderWithDefaults.order_hash.slice(0, 10) + '...');
 
-  // Check if order already exists (use maybeSingle to avoid 406 error)
-  const { data: existing, error: checkError } = await supabase
+  // Check if order already exists
+  const { data: existing } = await supabase
     .from('orders')
     .select('order_hash')
-    .eq('order_hash', order.order_hash)
+    .eq('order_hash', orderWithDefaults.order_hash)
     .maybeSingle();
 
-  if (checkError) {
-    console.error('Error checking existing order:', checkError);
-  }
-  console.log('Existing order check:', existing);
-
   if (existing) {
-    console.log('Updating existing order...');
-    // Update existing order
     const { error } = await supabase
       .from('orders')
       .update(orderWithDefaults)
-      .eq('order_hash', order.order_hash);
+      .eq('order_hash', orderWithDefaults.order_hash);
 
     if (error) {
       console.error('Error updating signed order:', error);
       return { success: false, error: error.message };
     }
-    console.log('Order updated successfully!');
+    console.log('Order updated successfully');
   } else {
-    console.log('Inserting new order...');
-    // Insert new order
     const { error } = await supabase
       .from('orders')
       .insert(orderWithDefaults);
@@ -828,10 +812,9 @@ export async function saveSignedOrder(order: DbOrder): Promise<{ success: boolea
       console.error('Error inserting signed order:', error);
       return { success: false, error: error.message };
     }
-    console.log('Order inserted successfully!');
+    console.log('Order inserted successfully');
   }
   
-  console.log('=== SAVE SIGNED ORDER COMPLETE ===');
   return { success: true };
 }
 
@@ -842,36 +825,23 @@ export async function getOrdersFromDb(
   baseToken: string,
   quoteToken?: string
 ): Promise<DbOrder[]> {
-  console.log('=== GET ORDERS FROM DB ===');
-  console.log('Querying base_token:', baseToken.toLowerCase());
-  console.log('Querying quote_token:', quoteToken?.toLowerCase() || 'any');
-  
   const supabase = getSupabaseClient();
   if (!supabase) {
-    console.error('Supabase not configured!');
+    console.error('getOrdersFromDb: Supabase not configured!');
     return [];
   }
 
-  // First, let's see ALL orders for this base token (ignoring is_active filter for debugging)
-  const { data: allOrders, error: debugError } = await supabase
-    .from('orders')
-    .select('order_hash, base_token, is_active, is_cancelled, side, price, created_at')
-    .eq('base_token', baseToken.toLowerCase())
-    .limit(10);
+  const baseTokenLower = baseToken.toLowerCase();
   
-  console.log('DEBUG - All orders for this token (ignoring is_active):', allOrders?.length || 0);
-  if (allOrders && allOrders.length > 0) {
-    console.log('Sample order:', allOrders[0]);
-  }
-
   let query = supabase
     .from('orders')
     .select('*')
-    .eq('base_token', baseToken.toLowerCase())
+    .eq('base_token', baseTokenLower)
     .eq('is_active', true)
     .eq('is_cancelled', false)
     .order('created_at', { ascending: false });
 
+  // Don't filter by quote_token if it's ETH (zero address)
   if (quoteToken && quoteToken !== '0x0000000000000000000000000000000000000000') {
     query = query.eq('quote_token', quoteToken.toLowerCase());
   }
@@ -883,8 +853,7 @@ export async function getOrdersFromDb(
     return [];
   }
   
-  console.log('Active orders found:', data?.length || 0);
-  console.log('=========================');
+  console.log(`getOrdersFromDb: Found ${data?.length || 0} active orders for ${baseTokenLower}`);
   return data || [];
 }
 
