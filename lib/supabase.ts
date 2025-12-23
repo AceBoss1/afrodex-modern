@@ -22,9 +22,9 @@ export interface DbOrder {
   price: number;
   base_amount: number;
   quote_amount: number;
-  is_active: boolean;
-  is_cancelled: boolean;
-  amount_filled: number;
+  is_active?: boolean;
+  is_cancelled?: boolean;
+  amount_filled?: number;
   created_at?: string;
 }
 
@@ -92,9 +92,17 @@ export async function saveOrder(order: DbOrder): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
 
+  // Set default values for optional fields
+  const orderWithDefaults = {
+    ...order,
+    is_active: order.is_active ?? true,
+    is_cancelled: order.is_cancelled ?? false,
+    amount_filled: order.amount_filled ?? 0,
+  };
+
   const { error } = await supabase
     .from('orders')
-    .upsert(order, { onConflict: 'order_hash' });
+    .upsert(orderWithDefaults, { onConflict: 'order_hash' });
 
   if (error) {
     console.error('Error saving order:', error);
