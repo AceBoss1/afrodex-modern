@@ -934,7 +934,7 @@ export async function savePartialFillOrder(
   console.log('New hash:', newHash);
   console.log('Remainder base amount:', baseAmount);
 
-  return saveSignedOrder(
+  const result = await saveSignedOrder(
     {
       tokenGet: originalOrder.tokenGet,
       amountGet: remainderAmountGet,
@@ -955,6 +955,7 @@ export async function savePartialFillOrder(
     baseAmount,
     quoteAmount
   );
+  return result.success;
 }
 
 // ============================================
