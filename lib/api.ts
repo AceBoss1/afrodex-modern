@@ -73,21 +73,23 @@ export async function fetchOrders(
   }
   console.log('Fetching orders from Supabase...');
   
-  const orders = await getOrdersFromDb(baseToken.address, quoteToken.address);
+  // getOrdersFromDb returns { buyOrders: DbOrder[], sellOrders: DbOrder[] }
+  const { buyOrders: dbBuyOrders, sellOrders: dbSellOrders } = await getOrdersFromDb(baseToken.address, quoteToken.address);
   
   const buyOrders: ProcessedOrder[] = [];
   const sellOrders: ProcessedOrder[] = [];
 
-  for (const order of orders) {
+  // Process buy orders
+  for (const order of dbBuyOrders) {
     // Debug logging for signature verification
-    console.log('=== LOADING ORDER FROM DB ===');
+    console.log('=== LOADING BUY ORDER FROM DB ===');
     console.log('DB v:', order.v, 'type:', typeof order.v);
     console.log('DB r:', order.r, 'length:', order.r?.length);
     console.log('DB s:', order.s, 'length:', order.s?.length);
     console.log('DB hash:', order.order_hash);
-    console.log('=============================');
+    console.log('=================================');
 
-    const processed: ProcessedOrder = {
+    buyOrders.push({
       tokenGet: order.token_get,
       amountGet: order.amount_get,
       tokenGive: order.token_give,
@@ -95,7 +97,7 @@ export async function fetchOrders(
       expires: order.expires,
       nonce: order.nonce,
       user: order.user_address,
-      side: order.side,
+      side: 'buy',
       price: order.price,
       availableVolume: order.amount_get,
       amountFilled: order.amount_filled,
@@ -103,13 +105,36 @@ export async function fetchOrders(
       r: order.r,
       s: order.s,
       hash: order.order_hash,
-    };
+    });
+  }
 
-    if (order.side === 'buy') {
-      buyOrders.push(processed);
-    } else {
-      sellOrders.push(processed);
-    }
+  // Process sell orders
+  for (const order of dbSellOrders) {
+    // Debug logging for signature verification
+    console.log('=== LOADING SELL ORDER FROM DB ===');
+    console.log('DB v:', order.v, 'type:', typeof order.v);
+    console.log('DB r:', order.r, 'length:', order.r?.length);
+    console.log('DB s:', order.s, 'length:', order.s?.length);
+    console.log('DB hash:', order.order_hash);
+    console.log('==================================');
+
+    sellOrders.push({
+      tokenGet: order.token_get,
+      amountGet: order.amount_get,
+      tokenGive: order.token_give,
+      amountGive: order.amount_give,
+      expires: order.expires,
+      nonce: order.nonce,
+      user: order.user_address,
+      side: 'sell',
+      price: order.price,
+      availableVolume: order.amount_get,
+      amountFilled: order.amount_filled,
+      v: order.v,
+      r: order.r,
+      s: order.s,
+      hash: order.order_hash,
+    });
   }
 
   console.log(`Got ${buyOrders.length} buy, ${sellOrders.length} sell orders from Supabase`);
