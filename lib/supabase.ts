@@ -146,7 +146,7 @@ export async function saveSignedOrder(
   price: number,
   baseAmount: number,
   quoteAmount: number
-): Promise<boolean>;
+): Promise<{ success: boolean; error?: string }>;
 
 // Overload for TradingPanel which passes a single object with snake_case fields
 export async function saveSignedOrder(
@@ -169,7 +169,7 @@ export async function saveSignedOrder(
     s: string;
     order_hash: string;
   }
-): Promise<boolean>;
+): Promise<{ success: boolean; error?: string }>;
 
 // Implementation
 export async function saveSignedOrder(
@@ -180,9 +180,9 @@ export async function saveSignedOrder(
   price?: number,
   baseAmount?: number,
   quoteAmount?: number
-): Promise<boolean> {
+): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabaseClient();
-  if (!supabase) return false;
+  if (!supabase) return { success: false, error: 'Supabase not configured' };
 
   let dbOrder: DbOrder;
 
@@ -259,11 +259,11 @@ export async function saveSignedOrder(
 
   if (error) {
     console.error('Error saving signed order:', error);
-    return false;
+    return { success: false, error: error.message };
   }
   
   console.log('Order inserted successfully');
-  return true;
+  return { success: true };
 }
 
 export async function getOrdersFromDb(
